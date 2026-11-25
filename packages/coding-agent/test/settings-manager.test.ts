@@ -723,6 +723,7 @@ describe("SettingsManager", () => {
 				"read",
 				"bash",
 				"edit",
+				"todo",
 				"codemode",
 			]);
 			expect(SettingsManager.inMemory({ defaultTools: ["read", "+grep", "+read"] }).getDefaultTools()).toEqual([
@@ -756,6 +757,7 @@ describe("SettingsManager", () => {
 				"bash",
 				"edit",
 				"write",
+				"todo",
 				"codemode",
 			]);
 		});

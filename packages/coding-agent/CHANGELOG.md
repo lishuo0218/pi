@@ -9,6 +9,7 @@
 ### Added
 
 - Added `compat.supportsStrictMode` for `google-generative-ai` and `google-vertex` models in `models.json`, so Gemini 3+ models served under IDs without the version can use strict tools ([#12321](https://github.com/earendil-works/pi/issues/12321))
+- Added the `todo` tool, enabled by default, for a per-task checklist: `action: "set"` replaces the whole list when a task starts, `action: "check"` marks one entry done or not done. The list is reported in the tool result details so clients can render it
 - Added a `blockedKind` option to `ctx.ui.select()`, `ctx.ui.confirm()` and `ctx.ui.input()` that sets the kind of blocked program status (OSC 7501) the dialog reports, for example `"permission"` for a select that approves an action. See [Dialogs](docs/extensions.md#program-status-kind)
 - Added `full_output_error` to the bash tool's structured output and `fullOutputError` to its details, `BashResult` and `BashExecutionMessage`, giving the reason when truncated output could not be saved to a temp file. User bash output that was truncated without a saved file now says so in the model context and the TUI ([#10585](https://github.com/earendil-works/pi/issues/10585))
 - Added the `gpt-6-luna-decisions` decision model for GitHub Copilot, callable from codemode `models.classify()` with text and images ([#12395](https://github.com/earendil-works/pi/issues/12395))
