@@ -70,6 +70,8 @@ export type GitCommit = {
   author: string;
   date: string;
   subject: string;
+  /** Full shas of the parent commits; the history graph draws a lane per parent. */
+  parents: string[];
   /** Branches, remote-tracking refs and tags that point at this commit. */
   refs: GitRef[];
 };
@@ -77,7 +79,20 @@ export type GitCommit = {
 /** A ref decoration: what kind it is decides its badge in the history column. */
 export type GitRef = { kind: "branch" | "remote" | "tag"; name: string };
 
+/** Names the history filter lists, grouped by the kind the select renders. */
+export type GitRefNames = { local: string[]; remote: string[]; tag: string[] };
+
 export type GitStats = { files: number; add: number; del: number };
+
+/** One file of a commit: its numstat counts; null counts mean binary. */
+export type GitCommitFile = { path: string; add: number | null; del: number | null };
+
+/** What the right pane needs for a selected commit besides its patch. */
+export type GitCommitDetail = {
+  commit: GitCommit;
+  stats: GitStats;
+  files: GitCommitFile[];
+};
 
 /** A patch as git printed it, plus the flags the page needs to render it. */
 export type GitDiff = {
@@ -103,7 +118,20 @@ export type GitRequest =
   | { action: "status" }
   | { action: "fileDiff"; path: string; side: GitSide; context: GitContext }
   | { action: "commitDiff"; sha: string }
-  | { action: "log"; limit: number; skip: number }
+  | { action: "commitFileDiff"; sha: string; path: string }
+  | { action: "commitDetail"; sha: string }
+  | { action: "refs" }
+  | {
+      action: "log";
+      limit: number;
+      skip: number;
+      /** Ref to walk, or null for HEAD. */
+      rev: string | null;
+      /** Walk every ref (`--all`) instead of a single starting point. */
+      all: boolean;
+      /** Literal text matched against the message or the author name. */
+      query: string | null;
+    }
   | { action: "draftMessage" }
   | { action: "fetch" }
   | { action: "pull" }
@@ -132,6 +160,8 @@ export type GitResult =
   | { ok: true; action: "status"; status: GitStatus }
   | { ok: true; action: "diff"; diff: GitDiff }
   | { ok: true; action: "commits"; commits: GitCommit[]; hasMore: boolean }
+  | { ok: true; action: "refs"; refs: GitRefNames }
+  | { ok: true; action: "detail"; detail: GitCommitDetail }
   | { ok: true; action: "message"; message: string }
   | { ok: true; action: "done"; output: string }
   | { ok: false; error: string; code: GitErrorCode };

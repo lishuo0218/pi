@@ -1,13 +1,16 @@
 // State of the Git view: repository status, the current selection (one side of
-// one file, or one commit), its patch, history paging, and one serialized write
-// path so two clicks cannot race on the index. The view subscribes to `version`;
-// nothing here touches the DOM.
+// one file, one commit, or one file inside a commit), its patch, the commit's
+// detail, history scope/search/paging, and one serialized write path so two
+// clicks cannot race on the index. The view subscribes to `version`; nothing
+// here touches the DOM.
 import type {
   GitCommit,
+  GitCommitDetail,
   GitContext,
   GitDiff,
   GitErrorCode,
   GitFile,
+  GitRefNames,
   GitRequest,
   GitSide,
   GitStatus,
@@ -19,16 +22,25 @@ export type GitStatusState =
   | { kind: "ready"; status: GitStatus }
   | { kind: "error"; error: string; code: GitErrorCode };
 
-/** What the right pane shows: one file side, or one commit. */
+/** Which commits the history column walks. */
+export type GitScope = { kind: "head" } | { kind: "all" } | { kind: "ref"; name: string };
+
+/** What the right pane shows: one file side, or one commit (all of it or one file). */
 export type GitSelection =
   | { kind: "file"; path: string; side: GitSide; untracked: boolean }
-  | { kind: "commit"; commit: GitCommit };
+  | { kind: "commit"; commit: GitCommit; file: string | null };
 
 export type GitDiffState =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "ready"; diff: GitDiff }
   | { kind: "error"; error: string; code: GitErrorCode };
+
+export type GitDetailState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "ready"; detail: GitCommitDetail }
+  | { kind: "error"; error: string };
 
 export type GitHistoryState =
   | { kind: "idle" }
@@ -50,12 +62,23 @@ const HISTORY_PAGE = 50;
 const STATUS_POLL_MS = 4_000;
 const NOTICE_MS = 4_000;
 
+function sameScope(left: GitScope, right: GitScope): boolean {
+  if (left.kind === "ref" && right.kind === "ref") return left.name === right.name;
+  return left.kind === right.kind;
+}
+
 export class GitStore {
   status: GitStatusState = { kind: "loading" };
   selection: GitSelection | null = null;
   diff: GitDiffState = { kind: "idle" };
   /** Context of the open file patch; `full` folds the gaps instead of hiding them. */
   context: GitContext = "small";
+  detail: GitDetailState = { kind: "idle" };
+  /** Branches, remotes and tags the history filter lists. */
+  refs: GitRefNames | null = null;
+  scope: GitScope = { kind: "head" };
+  /** Literal text the history walk matches against message and author. */
+  historyQuery = "";
   history: GitHistoryState = { kind: "idle" };
   commits: GitCommit[] = [];
   hasMore = false;
@@ -72,6 +95,7 @@ export class GitStore {
   private subscribers = new Set<() => void>();
   private writing = false;
   private diffSeq = 0;
+  private detailSeq = 0;
   private historySeq = 0;
   private closeStream: (() => void) | null = null;
   private disposers: (() => void)[] = [];
@@ -90,6 +114,7 @@ export class GitStore {
   /** Load once, then follow the repository and the window's focus. */
   start(): void {
     void this.refreshStatus();
+    void this.loadRefs();
     this.closeStream = watchGitChanges({
       onChange: () => void this.onRepositoryChange(),
       onUnavailable: (error, code) => {
@@ -175,18 +200,81 @@ export class GitStore {
 
   selectFile(file: GitFile, side: GitSide): void {
     this.selection = { kind: "file", path: file.path, side, untracked: file.untracked };
+    this.detail = { kind: "idle" };
     void this.fetchDiff(true);
   }
 
   selectCommit(commit: GitCommit): void {
-    this.selection = { kind: "commit", commit };
+    const current = this.selection;
+    if (
+      current !== null &&
+      current.kind === "commit" &&
+      current.commit.sha === commit.sha &&
+      this.detail.kind !== "error"
+    ) {
+      return;
+    }
+    this.selection = { kind: "commit", commit, file: null };
+    this.detail = { kind: "loading" };
+    this.emit();
+    void this.loadDetail(commit.sha);
     void this.fetchDiff(true);
+  }
+
+  /** Open one file of the selected commit, or the whole commit for null. */
+  selectCommitFile(path: string | null): void {
+    const selection = this.selection;
+    if (selection === null || selection.kind !== "commit") return;
+    if (selection.file === path && this.diff.kind !== "error") return;
+    this.selection = { ...selection, file: path };
+    void this.fetchDiff(true);
+  }
+
+  /**
+   * Open another commit by sha (a parent link): its detail supplies the commit
+   * fields the history row would have, so the pane waits for that one read.
+   */
+  async openCommit(sha: string): Promise<void> {
+    const seq = ++this.detailSeq;
+    this.detail = { kind: "loading" };
+    this.emit();
+    const res = await callGit({ action: "commitDetail", sha });
+    if (seq !== this.detailSeq) return;
+    if (!res.ok) {
+      this.detail = { kind: "error", error: res.error };
+      this.emit();
+      return;
+    }
+    if (res.action !== "detail") return;
+    this.selection = { kind: "commit", commit: res.detail.commit, file: null };
+    this.detail = { kind: "ready", detail: res.detail };
+    this.emit();
+    await this.fetchDiff(true);
+  }
+
+  private async loadDetail(sha: string): Promise<void> {
+    const seq = ++this.detailSeq;
+    const res = await callGit({ action: "commitDetail", sha });
+    if (seq !== this.detailSeq) return;
+    const selection = this.selection;
+    if (selection === null || selection.kind !== "commit" || selection.commit.sha !== sha) return;
+    if (!res.ok) {
+      this.detail = { kind: "error", error: res.error };
+      this.emit();
+      return;
+    }
+    if (res.action !== "detail") return;
+    this.detail = { kind: "ready", detail: res.detail };
+    // The detail read also refreshes the row's refs and parents.
+    if (this.selection === selection) this.selection = { ...selection, commit: res.detail.commit };
+    this.emit();
   }
 
   clearSelection(): void {
     if (this.selection === null) return;
     this.selection = null;
     this.diff = { kind: "idle" };
+    this.detail = { kind: "idle" };
     this.emit();
   }
 
@@ -198,9 +286,12 @@ export class GitStore {
   }
 
   private requestFor(selection: GitSelection): GitRequest {
-    return selection.kind === "commit"
-      ? { action: "commitDiff", sha: selection.commit.sha }
-      : { action: "fileDiff", path: selection.path, side: selection.side, context: this.context };
+    if (selection.kind === "commit") {
+      return selection.file === null
+        ? { action: "commitDiff", sha: selection.commit.sha }
+        : { action: "commitFileDiff", sha: selection.commit.sha, path: selection.file };
+    }
+    return { action: "fileDiff", path: selection.path, side: selection.side, context: this.context };
   }
 
   /** Read the selected patch; `showLoading` is false for silent refreshes. */
@@ -297,19 +388,33 @@ export class GitStore {
   }
 
   /** Refresh remote-tracking refs; ahead/behind comes back with the status. */
-  fetchRemote(): Promise<boolean> {
-    return this.runWrite("获取", { action: "fetch" });
+  async fetchRemote(): Promise<boolean> {
+    const ok = await this.runWrite("获取", { action: "fetch" });
+    if (ok) this.refreshHistory();
+    return ok;
   }
 
   /** Fast-forward only: a diverged branch is refused instead of merged. */
   async pull(): Promise<boolean> {
     const ok = await this.runWrite("拉取", { action: "pull" });
-    if (ok && this.history.kind === "ready") await this.loadHistory(false);
+    if (ok) await this.refreshHistory();
     return ok;
   }
 
-  push(): Promise<boolean> {
-    return this.runWrite("推送", { action: "push" });
+  async push(): Promise<boolean> {
+    const ok = await this.runWrite("推送", { action: "push" });
+    if (ok) this.refreshHistory();
+    return ok;
+  }
+
+  /**
+   * Every network action moves remote-tracking refs, so both the filter list and
+   * the badges of the loaded commits are stale afterwards. Reloading page one is
+   * the only way to re-read them; a deep scroll position resets to the top.
+   */
+  private async refreshHistory(): Promise<void> {
+    void this.loadRefs();
+    if (this.history.kind === "ready") await this.loadHistory(false);
   }
 
   /** Pushing publishes commits to a remote, so it asks first. */
@@ -389,6 +494,28 @@ export class GitStore {
     return res.message;
   }
 
+  /** Read the branch/remote/tag names the history filter lists. */
+  async loadRefs(): Promise<void> {
+    const res = await callGit({ action: "refs" });
+    if (!res.ok || res.action !== "refs") return;
+    this.refs = res.refs;
+    this.emit();
+  }
+
+  /** Walk another starting point; the list starts over from its newest commit. */
+  setScope(scope: GitScope): void {
+    if (sameScope(this.scope, scope)) return;
+    this.scope = scope;
+    void this.loadHistory(false);
+  }
+
+  /** Search message and author literally; the walk restarts from the first match. */
+  setHistoryQuery(query: string): void {
+    if (this.historyQuery === query) return;
+    this.historyQuery = query;
+    void this.loadHistory(false);
+  }
+
   /** Load the first page of history, or one more page after it. */
   async loadHistory(more: boolean): Promise<void> {
     // The list tail asks for the next page whenever it becomes visible, which
@@ -401,7 +528,15 @@ export class GitStore {
       this.history = { kind: "loading" };
     }
     this.emit();
-    const res = await callGit({ action: "log", limit: HISTORY_PAGE, skip: more ? this.commits.length : 0 });
+    const scope = this.scope;
+    const res = await callGit({
+      action: "log",
+      limit: HISTORY_PAGE,
+      skip: more ? this.commits.length : 0,
+      rev: scope.kind === "ref" ? scope.name : null,
+      all: scope.kind === "all",
+      query: this.historyQuery === "" ? null : this.historyQuery,
+    });
     this.loadingMore = false;
     if (seq !== this.historySeq) return;
     if (!res.ok) {

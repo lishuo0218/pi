@@ -13,13 +13,17 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function CopyButton({ text, label }: { text: string; label: string }): JSX.Element {
+export function CopyButton({ text, label, class: className = "copy-btn" }: {
+  text: string;
+  label: string;
+  class?: string;
+}): JSX.Element {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   return (
     <button
-      class="copy-btn"
+      class={className}
       onClick={() => {
         void copyText(text).then((ok) => {
           if (!ok) return;

@@ -97,6 +97,22 @@ export async function readCommitDiff(repo: Repo, sha: string): Promise<GitResult
   return { ok: true, action: "diff", diff: asDiff(run.stdout, run.truncated, false) };
 }
 
+/** One file's patch inside a commit; `--` guards a path that looks like an option. */
+export async function readCommitFileDiff(repo: Repo, sha: string, path: string): Promise<GitResult> {
+  const run = await runGit(repo.root, [
+    "show",
+    ...DIFF_ARGS,
+    "--unified=3",
+    "--patch",
+    "--format=",
+    sha,
+    "--",
+    path,
+  ]);
+  if (!succeeded(run)) return { ok: false, error: errorText(run, "git show"), code: "failed" };
+  return { ok: true, action: "diff", diff: asDiff(run.stdout, run.truncated, false) };
+}
+
 /**
  * Split a one-file patch into its header and its hunks. Null when there is no
  * hunk to apply (binary patch, or no diff at all).

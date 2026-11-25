@@ -14,7 +14,22 @@ describe("parseRequest", () => {
       side: "index",
       context: "full",
     });
-    expect(parseRequest({ action: "log", limit: 50, skip: 100 })).toEqual({ action: "log", limit: 50, skip: 100 });
+    expect(parseRequest({ action: "log", limit: 50, skip: 100 })).toEqual({
+      action: "log",
+      limit: 50,
+      skip: 100,
+      rev: null,
+      all: false,
+      query: null,
+    });
+    expect(parseRequest({ action: "log", limit: 10, skip: 0, rev: "refs/heads/main", query: "fix" })).toEqual({
+      action: "log",
+      limit: 10,
+      skip: 0,
+      rev: "refs/heads/main",
+      all: false,
+      query: "fix",
+    });
     expect(parseRequest({ action: "stage", paths: ["a.txt", "dir/b.txt"] })).toEqual({
       action: "stage",
       paths: ["a.txt", "dir/b.txt"],
@@ -24,6 +39,10 @@ describe("parseRequest", () => {
       message: "msg",
       amend: true,
     });
+    expect(parseRequest({ action: "refs" })).toEqual({ action: "refs" });
+    expect(parseRequest({ action: "commitDetail", sha: "a1b2c3d" })).not.toBeNull();
+    expect(parseRequest({ action: "commitFileDiff", sha: "a1b2c3d", path: "a.txt" })).not.toBeNull();
+    expect(parseRequest({ action: "commitFileDiff", sha: "a1b2c3d", path: "../b" })).toBeNull();
     // Network actions carry no fields at all.
     for (const action of ["fetch", "pull", "push"]) {
       expect(parseRequest({ action })).toEqual({ action });
@@ -79,6 +98,21 @@ describe("parseRequest", () => {
   it("caps the commit message and refuses NUL bytes", () => {
     expect(parseRequest({ action: "commit", message: "x".repeat(100_001), amend: false })).toBeNull();
     expect(parseRequest({ action: "commit", message: "a\0b", amend: false })).toBeNull();
+  });
+
+  it("refuses a walk that both names a ref and covers every ref", () => {
+    expect(parseRequest({ action: "log", limit: 10, skip: 0, rev: "refs/heads/main", all: true })).toBeNull();
+  });
+
+  it("refuses revisions and queries that git would read as options or syntax", () => {
+    for (const rev of ["-n1", "--all", "a..b", "a~1", "main@{1}", "/main", "main/", "main.lock", "a b"]) {
+      expect(parseRequest({ action: "log", limit: 10, skip: 0, rev })).toBeNull();
+    }
+    const nul = String.fromCharCode(0);
+    const lf = String.fromCharCode(10);
+    for (const query of [`a${nul}b`, `a${lf}b`, "x".repeat(201)]) {
+      expect(parseRequest({ action: "log", limit: 10, skip: 0, query })).toBeNull();
+    }
   });
 
   it("keeps the log page bounded", () => {

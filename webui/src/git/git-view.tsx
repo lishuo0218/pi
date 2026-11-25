@@ -8,6 +8,7 @@ import type { GitFile, GitSide, GitStatus } from "../../bridge/git/types";
 import { GitChanges } from "./changes";
 import { GitCommitBox } from "./commit";
 import { GitDiffView, type HunkActions } from "./diff-view";
+import { GitCommitDetail } from "./commit-detail";
 import { parsePatch } from "./diff-parse";
 import { GitHistory } from "./history";
 import { GitStore } from "./store";
@@ -45,7 +46,8 @@ function trackingHint(kind: "拉取" | "推送", status: GitStatus | null, enabl
   return enabled ? `拉取 ${status.upstream}（仅快进，分叉时拒绝）` : "没有需要拉取的提交";
 }
 
-export function GitView({ onClose }: { onClose: () => void }): JSX.Element {  const storeRef = useRef<GitStore | null>(null);
+export function GitView({ onClose }: { onClose: () => void }): JSX.Element {
+  const storeRef = useRef<GitStore | null>(null);
   if (storeRef.current === null) storeRef.current = new GitStore();
   const store = storeRef.current;
   useSyncExternalStore(
@@ -58,11 +60,14 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {  co
     return () => store.dispose();
   }, [store]);
 
-  // Capture phase so the view's Esc wins over the app's own handlers; the
-  // diff pane's find bar registers earlier and stops its own Escape.
+  // Capture phase so the view's Esc wins over the app's own handlers. A control
+  // marked `data-esc` consumes Escape itself (the history search clears), and
+  // the diff pane's find bar stops its own Escape.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.dataset.esc !== undefined) return;
       event.preventDefault();
       if (store.confirm !== null) {
         store.cancelConfirm();
@@ -220,9 +225,6 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {  co
                     <span class="gv-main-title">
                       <span class="gv-commit-sha">{selection.commit.short}</span>
                       <span class="gv-main-subject">{selection.commit.subject}</span>
-                      <span class="gv-main-meta">
-                        {selection.commit.author} · {selection.commit.date}
-                      </span>
                     </span>
                   ) : (
                     <>
@@ -266,6 +268,7 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {  co
                     </>
                   )}
                 </div>
+                {selection.kind === "commit" ? <GitCommitDetail store={store} /> : null}
                 {diffState.kind === "ready" && diffState.diff.truncated ? (
                   <div class="gv-banner">patch 超过 1 MB，已截断；按块操作已禁用。</div>
                 ) : null}
@@ -280,7 +283,7 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {  co
                 ) : diffState.kind === "ready" ? (
                   <GitDiffView
                     rows={rows}
-                    path={selection.kind === "commit" ? "" : selection.path}
+                    path={selection.kind === "commit" ? (selection.file ?? "") : selection.path}
                     hunkActions={hunkActions}
                   />
                 ) : null}

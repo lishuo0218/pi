@@ -17,6 +17,15 @@
   --c-success: #3d7a3d;
   --c-warning: #b37d1e;
   --c-running: #1a1a19;
+  /* 历史泳道图：8 条泳道循环取色（亮色：中饱和，落在 --c-bg-subtle 上可读） */
+  --c-lane-1: #4a76b8;
+  --c-lane-2: #c07a33;
+  --c-lane-3: #3f8a68;
+  --c-lane-4: #8a5bb5;
+  --c-lane-5: #c0504d;
+  --c-lane-6: #2f8b9e;
+  --c-lane-7: #8f7d2e;
+  --c-lane-8: #b0588c;
   /* 用户气泡底（DESIGN.md §5.1 为文档流，按用户决策用户侧改用靠右窄气泡） */
   --c-bubble-bg: #f7f7f5;
   /* 间距阶梯 */
@@ -71,6 +80,15 @@
   --c-success: #6fae6f;
   --c-warning: #d1a04a;
   --c-running: #e8e8e6;
+  /* 历史泳道图：暗色下同色相提亮，避免在 --c-bg-subtle 上发黑 */
+  --c-lane-1: #79a6e0;
+  --c-lane-2: #d9a05f;
+  --c-lane-3: #74c193;
+  --c-lane-4: #b78ae6;
+  --c-lane-5: #e5847f;
+  --c-lane-6: #63c1d0;
+  --c-lane-7: #cfbb63;
+  --c-lane-8: #dd8fba;
   --c-bubble-bg: #1d1d1c;
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 2px 12px rgba(0, 0, 0, 0.5);
@@ -2887,7 +2905,7 @@ body {
 }
 /* === Git 视图（全屏，F-29）=== */
 /* 尺寸基准：文件行 22px、diff 行 18px（与 diff-view.tsx 的 LINE_HEIGHT 一致）、
-   改动栏 340px、历史栏 280px。三栏用底色与 1px 分隔线分层；选中态统一为
+   改动栏 340px、历史栏 360px。三栏用底色与 1px 分隔线分层；选中态统一为
    2px 左侧竖条 + 底色；按钮只有一种：无边框文字按钮，悬停才出底色，
    危险操作悬停变红。 */
 .gv {
@@ -3029,12 +3047,70 @@ body {
 }
 .gv-history {
   flex: none;
-  width: 280px;
+  width: 360px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--c-bg-subtle);
+  border-right: 1px solid var(--c-border);
+}
+/* 筛选与搜索：两行常驻在列表之上，不随历史滚动 */
+.gv-history-head {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px var(--sp-2);
+  border-bottom: 1px solid var(--c-border);
+}
+.gv-scope {
+  width: 100%;
+  height: 24px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--c-fg-secondary);
+  background: var(--c-bg-inset);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  outline: none;
+  cursor: pointer;
+}
+.gv-scope:hover {
+  color: var(--c-fg);
+}
+.gv-scope:focus-visible {
+  border-color: var(--c-border-strong);
+}
+.gv-search-input {
+  width: 100%;
+  height: 24px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--c-fg);
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+.gv-search-input::placeholder {
+  color: var(--c-fg-tertiary);
+}
+.gv-search-input:focus {
+  border-color: var(--c-border-strong);
+}
+/* 列表容器自己滚动，键盘上下选择要求它能接收焦点 */
+.gv-history-body {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  background: var(--c-bg-subtle);
-  border-right: 1px solid var(--c-border);
+  outline: none;
+}
+.gv-history-body:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--c-border-strong);
 }
 .gv-main {
   flex: 1;
@@ -3065,12 +3141,6 @@ body {
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gv-main-meta {
-  margin-left: var(--sp-2);
-  font-size: 11px;
-  color: var(--c-fg-tertiary);
   white-space: nowrap;
 }
 .gv-main-actions {
@@ -3290,19 +3360,130 @@ body {
   white-space: nowrap;
 }
 
-/* 历史栏：每行固定 34px，上行短 sha（等宽），下行单行标题 + refs 徽标；
-   作者与时间仍放 title，选中态与文件行一致（2px 竖条 + 8% 底色） */
+/* 提交详情：作者、时间、父提交、文件列表都压在 diff 上方，窄屏也不占右侧列 */
+.gv-detail {
+  flex: none;
+  border-bottom: 1px solid var(--c-border);
+}
+.gv-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 26px;
+  padding: 3px var(--sp-2) 3px var(--sp-3);
+  font-size: 11px;
+  color: var(--c-fg-secondary);
+  overflow: hidden;
+}
+.gv-detail-author {
+  font-size: 11.5px;
+  color: var(--c-fg);
+  white-space: nowrap;
+}
+.gv-detail-date {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--c-fg-tertiary);
+  white-space: nowrap;
+}
+.gv-detail-parents {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--c-fg-tertiary);
+}
+/* 父提交是按钮而不是链接：没有下划线，靠悬停底色说明可点 */
+.gv-link {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 0 3px;
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--c-fg-secondary);
+  cursor: pointer;
+}
+.gv-link:hover {
+  color: var(--c-fg);
+  background: var(--c-bg-inset);
+}
+.gv-detail-stats {
+  display: flex;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--c-fg-tertiary);
+  white-space: nowrap;
+}
+.gv-detail-spacer {
+  flex: 1;
+}
+.gv-detail-loading {
+  font-size: 10.5px;
+  color: var(--c-fg-tertiary);
+}
+.gv-detail-error {
+  margin: 0;
+  padding: 0 var(--sp-3) 5px;
+  font-size: 11px;
+  color: var(--c-error);
+}
+.gv-detail-files {
+  display: flex;
+  flex-direction: column;
+  max-height: 150px;
+  overflow-y: auto;
+  padding-bottom: 4px;
+  scrollbar-gutter: stable;
+}
+.gv-detail-file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  height: 22px;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--c-fg-secondary);
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+.gv-detail-file:hover {
+  background: var(--c-bg-inset);
+}
+.gv-detail-file:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--c-border-strong);
+}
+.gv-detail-file.active {
+  background: color-mix(in srgb, var(--c-fg) 8%, transparent);
+  border-left-color: var(--c-fg);
+  color: var(--c-fg);
+}
+.gv-detail-file.all {
+  font-size: 11px;
+  color: var(--c-fg-tertiary);
+}
+.gv-detail-file.all.active {
+  color: var(--c-fg);
+}
+/* 历史栏：每行 40px，两行文本。上行标题 + refs 徽标，下行短 sha + 作者/时间，
+   悬停时作者/时间让位给复制按钮；左侧是 10px 宽的泳道图。选中态与文件行一致
+   （2px 竖条 + 8% 底色）。窄栏里 sha 是最能认的锚点，用等宽字保留 */
 .gv-log {
   display: flex;
   flex-direction: column;
 }
 .gv-commit {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 1px;
-  height: 34px;
-  padding: 3px var(--sp-2) 3px 9px;
+  align-items: center;
+  flex: none;
+  height: 40px;
   border-left: 2px solid transparent;
   cursor: pointer;
   outline: none;
@@ -3317,22 +3498,49 @@ body {
   background: color-mix(in srgb, var(--c-fg) 8%, transparent);
   border-left-color: var(--c-fg);
 }
-/* sha 是这一栏最能认的锚点：等宽 + 轻微字距，比标题弱一档但不再淡到看不清 */
+.gv-lane {
+  flex: none;
+  display: block;
+}
+.gv-lane-line {
+  fill: none;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+/* 节点与线同色；选中节点靠 fg 描边而不是换色，保住泳道的身份 */
+.gv-lane-node.active {
+  stroke: var(--c-fg);
+  stroke-width: 1.5;
+}
+.gv-commit-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding-right: var(--sp-2);
+}
+.gv-commit-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.gv-commit-line.meta {
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--c-fg-tertiary);
+}
 .gv-commit-sha {
+  flex: none;
   font-family: var(--font-mono);
   font-size: 10.5px;
-  line-height: 1.2;
   letter-spacing: 0.03em;
   color: var(--c-fg-secondary);
 }
 .gv-commit.active .gv-commit-sha {
   color: var(--c-fg);
-}
-.gv-commit-title {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
 }
 .gv-commit-subject {
   flex: 1;
@@ -3343,12 +3551,39 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.gv-commit-extra {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gv-commit-actions .gv-mini,
+.gv-detail-meta .gv-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.gv-commit-actions {
+  display: none;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+}
+.gv-commit:hover .gv-commit-actions,
+.gv-commit:focus-within .gv-commit-actions {
+  display: flex;
+}
+.gv-commit:hover .gv-commit-extra,
+.gv-commit:focus-within .gv-commit-extra {
+  display: none;
+}
 .gv-commit-refs {
   flex: none;
   display: flex;
   align-items: center;
   gap: 3px;
-  max-width: 52%;
+  max-width: 48%;
   overflow: hidden;
 }
 /* 徽标：无边框小胶囊，只靠底色与字色分层；本地分支最深、远程跟踪最淡、标签用警示色 */

@@ -58,6 +58,142 @@ describe("log", () => {
     expect(page.subjects).toEqual([]);
     expect(page.hasMore).toBe(false);
   });
+
+  it("carries the parent shas, none for the root commit", async () => {
+    const dir = await repoWithFourCommits();
+    const reply = await call(dir, { action: "log", limit: 10, skip: 0 });
+    if (!reply.ok || reply.action !== "commits") throw new Error(JSON.stringify(reply));
+    const [head, second, , , root] = reply.commits;
+    expect(head?.parents).toEqual([second?.sha]);
+    expect(root?.parents).toEqual([]);
+  });
+});
+
+describe("log scope", () => {
+  /** A repo whose main and side branches each have their own commit. */
+  async function repoWithTwoBranches(): Promise<string> {
+    const fixture = await makeRepo();
+    fixtures.push(fixture);
+    const dir = fixture.dir;
+    // Branch first, so each side has a commit the other walk must not reach.
+    await git(dir, ["checkout", "-q", "-b", "side"]);
+    await write(dir, "b.txt", "side\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "side work"]);
+    await git(dir, ["checkout", "-q", "main"]);
+    await write(dir, "a.txt", "main\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "main work"]);
+    return dir;
+  }
+
+  it("walks the given ref instead of HEAD", async () => {
+    const dir = await repoWithTwoBranches();
+    const page = commitsOf(
+      await call(dir, { action: "log", limit: 5, skip: 0, rev: "refs/heads/side", all: false, query: null }),
+    );
+    expect(page.subjects).toEqual(["side work", "init"]);
+  });
+
+  it("walks every ref when asked for all", async () => {
+    const dir = await repoWithTwoBranches();
+    const page = commitsOf(
+      await call(dir, { action: "log", limit: 5, skip: 0, rev: null, all: true, query: null }),
+    );
+    // Git's graph order is not asserted here; both branches' commits must show.
+    expect(page.subjects).toEqual(expect.arrayContaining(["side work", "main work", "init"]));
+  });
+});
+
+describe("log order", () => {
+  it("lists a parent after its child when a tag starts a second walk", async () => {
+    const fixture = await makeRepo();
+    fixtures.push(fixture);
+    const dir = fixture.dir;
+    // Same committer date on purpose: with `--all` the tag is a second starting
+    // point, and without an explicit order git prints the tagged release before
+    // the commit built on top of it. The lane layout draws one line down per
+    // parent, so that order would leave a lane that never reaches a commit.
+    const env = { ...process.env, GIT_AUTHOR_DATE: "2026-01-01T00:00:00", GIT_COMMITTER_DATE: "2026-01-01T00:00:00" };
+    await write(dir, "a.txt", "release\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "release"], env);
+    await git(dir, ["tag", "v1"], env);
+    await write(dir, "b.txt", "child\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "child of release"], env);
+    await write(dir, "c.txt", "later\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "later"], env);
+
+    const page = commitsOf(await call(dir, { action: "log", limit: 10, skip: 0, rev: null, all: true, query: null }));
+    expect(page.subjects).toEqual(["later", "child of release", "release", "init"]);
+  });
+});
+
+describe("log search", () => {
+  /** A repo with messages and authors the search must tell apart. */
+  async function repoWithSearchableCommits(): Promise<string> {
+    const fixture = await makeRepo();
+    fixtures.push(fixture);
+    const dir = fixture.dir;
+    await write(dir, "a.txt", "one\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "Fix (a+b) handling"]);
+    await write(dir, "b.txt", "two\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "unrelated", "--author", "Alice <alice@example.com>"]);
+    return dir;
+  }
+
+  it("matches the message literally and case-insensitively", async () => {
+    const dir = await repoWithSearchableCommits();
+    const page = commitsOf(
+      await call(dir, { action: "log", limit: 10, skip: 0, rev: null, all: false, query: "fix (A+B)" }),
+    );
+    expect(page.subjects).toEqual(["Fix (a+b) handling"]);
+  });
+
+  it("does not read the query as a regular expression", async () => {
+    const dir = await repoWithSearchableCommits();
+    const page = commitsOf(
+      await call(dir, { action: "log", limit: 10, skip: 0, rev: null, all: false, query: "Fix.*handling" }),
+    );
+    expect(page.subjects).toEqual([]);
+  });
+
+  it("matches the author as well as the message", async () => {
+    const dir = await repoWithSearchableCommits();
+    const page = commitsOf(
+      await call(dir, { action: "log", limit: 10, skip: 0, rev: null, all: false, query: "alice" }),
+    );
+    expect(page.subjects).toEqual(["unrelated"]);
+  });
+
+  it("finds a commit by abbreviated sha", async () => {
+    const dir = await repoWithSearchableCommits();
+    const short = (await git(dir, ["rev-parse", "--short=8", "HEAD~1"])).trim();
+    const page = commitsOf(
+      await call(dir, { action: "log", limit: 10, skip: 0, rev: null, all: false, query: short }),
+    );
+    expect(page.subjects).toEqual(["Fix (a+b) handling"]);
+  });
+
+  it("pages a search from its own start and ends on the last match", async () => {
+    const dir = await repoWithSearchableCommits();
+    const first = commitsOf(
+      await call(dir, { action: "log", limit: 1, skip: 0, rev: null, all: false, query: "i" }),
+    );
+    expect(first.subjects).toHaveLength(1);
+    expect(first.hasMore).toBe(true);
+    const second = commitsOf(
+      await call(dir, { action: "log", limit: 5, skip: 1, rev: null, all: false, query: "i" }),
+    );
+    expect(second.hasMore).toBe(false);
+    expect(first.subjects.concat(second.subjects)).toEqual(
+      expect.arrayContaining(["Fix (a+b) handling", "unrelated", "init"]),
+    );
+  });
 });
 
 describe("log refs", () => {

@@ -2,7 +2,8 @@
 // request in a non-repo directory fails with a setup state the page can show),
 // validates its own fields in validate.ts, runs one git command, and returns a
 // tagged result. Writes go through the per-repository queue in write.ts.
-import { applyHunk, readCommitDiff, readFileDiff } from "./diff.ts";
+import { applyHunk, readCommitDiff, readCommitFileDiff, readFileDiff } from "./diff.ts";
+import { readCommitDetail, readRefs } from "./detail.ts";
 import { readLog } from "./log.ts";
 import { draftCommitMessage } from "./message.ts";
 import { fetchRemote, pull, push } from "./remote.ts";
@@ -26,8 +27,14 @@ export async function handleGit(body: unknown, cwd: string, piPath: string): Pro
       return readFileDiff(repo, request.path, request.side, request.context);
     case "commitDiff":
       return readCommitDiff(repo, request.sha);
+    case "commitFileDiff":
+      return readCommitFileDiff(repo, request.sha, request.path);
+    case "commitDetail":
+      return readCommitDetail(repo, request.sha);
+    case "refs":
+      return readRefs(repo);
     case "log":
-      return readLog(repo, request.limit, request.skip);
+      return readLog(repo, request);
     // The draft runs pi with no tools, so it cannot touch the index: no queue.
     case "draftMessage":
       return draftCommitMessage(repo, piPath);

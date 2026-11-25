@@ -47,6 +47,30 @@ function asCount(value: unknown, min: number, max: number): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : null;
 }
 
+/**
+ * A ref the history filter can start a walk at. The value becomes an argv word,
+ * so option-looking or whitespace-carrying names are refused, as are the
+ * revision syntax characters git would otherwise interpret.
+ */
+function asRev(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || value === "" || value.length > 1_024) return undefined;
+  if (/[\u0000-\u001f\u007f\s~^:?*\[\\]/.test(value)) return undefined;
+  if (value.startsWith("-") || value.startsWith("/") || value.endsWith("/")) return undefined;
+  if (value.endsWith(".") || value.endsWith(".lock") || value.includes("..") || value.includes("@{")) {
+    return undefined;
+  }
+  return value;
+}
+
+/** Literal search text; empty means no search rather than a match-everything pattern. */
+function asQuery(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || value === "" || value.length > 200) return undefined;
+  if (/[\u0000-\u001f\u007f]/.test(value)) return undefined;
+  return value;
+}
+
 /** Validate one request; null means malformed and nothing is run. */
 export function parseRequest(body: unknown): GitRequest | null {
   if (!isRecord(body)) return null;
@@ -63,11 +87,25 @@ export function parseRequest(body: unknown): GitRequest | null {
       if (typeof body.sha !== "string" || !SHA_RE.test(body.sha)) return null;
       return { action: "commitDiff", sha: body.sha };
     }
+    case "commitFileDiff": {
+      if (typeof body.sha !== "string" || !SHA_RE.test(body.sha) || !isRepoPath(body.path)) return null;
+      return { action: "commitFileDiff", sha: body.sha, path: body.path };
+    }
+    case "commitDetail": {
+      if (typeof body.sha !== "string" || !SHA_RE.test(body.sha)) return null;
+      return { action: "commitDetail", sha: body.sha };
+    }
+    case "refs":
+      return { action: "refs" };
     case "log": {
       const limit = asCount(body.limit, 1, 200);
       const skip = asCount(body.skip, 0, 1_000_000);
-      if (limit === null || skip === null) return null;
-      return { action: "log", limit, skip };
+      const rev = asRev(body.rev);
+      const query = asQuery(body.query);
+      if (limit === null || skip === null || rev === undefined || query === undefined) return null;
+      // A walk cannot both start at one ref and cover every ref.
+      if (rev !== null && body.all === true) return null;
+      return { action: "log", limit, skip, rev, all: body.all === true, query };
     }
     case "draftMessage":
       return { action: "draftMessage" };

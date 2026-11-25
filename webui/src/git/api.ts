@@ -4,11 +4,14 @@
 // views only ever switch on checked shapes.
 import type {
   GitCommit,
+  GitCommitDetail,
+  GitCommitFile,
   GitConflictKind,
   GitErrorCode,
   GitFile,
   GitOperation,
   GitRef,
+  GitRefNames,
   GitRequest,
   GitResult,
   GitStatus,
@@ -104,9 +107,46 @@ function parseCommits(value: unknown): GitCommit[] | null {
     const { sha, short, author, date, subject, refs } = entry;
     if (typeof sha !== "string" || typeof short !== "string" || typeof author !== "string") continue;
     if (typeof date !== "string" || typeof subject !== "string") continue;
-    commits.push({ sha, short, author, date, subject, refs: parseRefs(refs) });
+    const parents = parseStrings(entry.parents);
+    commits.push({ sha, short, author, date, subject, parents, refs: parseRefs(refs) });
   }
   return commits;
+}
+
+function parseStrings(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item !== "");
+}
+
+function parseRefNames(value: unknown): GitRefNames | null {
+  if (!isRecord(value)) return null;
+  return { local: parseStrings(value.local), remote: parseStrings(value.remote), tag: parseStrings(value.tag) };
+}
+
+function parseCommitFiles(value: unknown): GitCommitFile[] {
+  if (!Array.isArray(value)) return [];
+  const files: GitCommitFile[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.path !== "string") continue;
+    const add = entry.add;
+    const del = entry.del;
+    files.push({
+      path: entry.path,
+      add: typeof add === "number" ? add : null,
+      del: typeof del === "number" ? del : null,
+    });
+  }
+  return files;
+}
+
+function parseCommitDetail(value: unknown): GitCommitDetail | null {
+  if (!isRecord(value)) return null;
+  const commit = parseCommits([value.commit]);
+  const stats = value.stats;
+  if (commit === null || commit[0] === undefined || !isRecord(stats)) return null;
+  const { files, add, del } = stats;
+  if (typeof files !== "number" || typeof add !== "number" || typeof del !== "number") return null;
+  return { commit: commit[0], stats: { files, add, del }, files: parseCommitFiles(value.files) };
 }
 
 function parseRefs(value: unknown): GitRef[] {
@@ -165,6 +205,18 @@ function parseResult(data: unknown): GitResult {
       const commits = parseCommits(data.commits);
       if (commits === null) return { ok: false, error: "invalid log reply", code: "failed" };
       return { ok: true, action: "commits", commits, hasMore: data.hasMore === true };
+    }
+    case "refs": {
+      const refs = parseRefNames(data.refs);
+      return refs === null
+        ? { ok: false, error: "invalid refs reply", code: "failed" }
+        : { ok: true, action: "refs", refs };
+    }
+    case "detail": {
+      const detail = parseCommitDetail(data.detail);
+      return detail === null
+        ? { ok: false, error: "invalid commit detail reply", code: "failed" }
+        : { ok: true, action: "detail", detail };
     }
     case "message": {
       const message = asString(data.message);

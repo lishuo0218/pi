@@ -14,10 +14,14 @@ const exec = promisify(execFile);
 export type Fixture = { dir: string; cleanup: () => Promise<void> };
 
 /** Run git in `dir` and return stdout; a non-zero exit rejects. */
-export async function git(dir: string, args: string[]): Promise<string> {
+export async function git(
+  dir: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
   const { stdout } = await exec("git", ["-c", "core.quotepath=false", ...args], {
     cwd: dir,
-    env: process.env,
+    env,
     windowsHide: true,
   });
   return stdout;

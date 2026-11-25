@@ -4,6 +4,7 @@
 import type { JSX } from "preact";
 import { useState } from "preact/hooks";
 import type { GitFile, GitSide, GitStatus } from "../../bridge/git/types";
+import { pathParts } from "./path-parts";
 import type { GitStore } from "./store";
 
 type Group = {
@@ -33,12 +34,6 @@ function groupsOf(status: GitStatus): Group[] {
     { key: "changes", title: "改动", side: "worktree", files: changed },
     { key: "untracked", title: "未跟踪", side: "worktree", files: untracked },
   ];
-}
-
-/** `dir/` dimmed, `file` bright: the tail is what the user is looking for. */
-function pathParts(path: string): { dir: string; name: string } {
-  const cut = path.lastIndexOf("/");
-  return cut === -1 ? { dir: "", name: path } : { dir: path.slice(0, cut + 1), name: path.slice(cut + 1) };
 }
 
 export function GitChanges({ store, status }: { store: GitStore; status: GitStatus }): JSX.Element {

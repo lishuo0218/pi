@@ -32,7 +32,7 @@ function conflictOf(code: string): GitConflictKind | null {
 }
 
 /** Parse `--numstat -z`: `add\tdel\tpath`, and for renames `add\tdel\t` then old, new. */
-function parseNumstat(text: string): Map<string, Stat> {
+export function parseNumstat(text: string): Map<string, Stat> {
   const stats = new Map<string, Stat>();
   const records = text.split("\0");
   for (let index = 0; index < records.length; index++) {
