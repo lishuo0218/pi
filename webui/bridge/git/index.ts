@@ -5,6 +5,7 @@
 import { applyHunk, readCommitDiff, readFileDiff } from "./diff.ts";
 import { readLog } from "./log.ts";
 import { draftCommitMessage } from "./message.ts";
+import { fetchRemote, pull, push } from "./remote.ts";
 import { resolveRepo } from "./repo.ts";
 import { readStatus } from "./status.ts";
 import { gitError, type GitResult } from "./types.ts";
@@ -33,6 +34,14 @@ export async function handleGit(body: unknown, cwd: string, piPath: string): Pro
     // Applying a hunk writes the index or the worktree, so it joins the queue.
     case "hunk":
       return serializeWrite(repo.root, () => applyHunk(repo, request));
+    // fetch and push only move refs; pull also writes HEAD and the worktree, so
+    // it alone joins the write queue.
+    case "fetch":
+      return fetchRemote(repo);
+    case "pull":
+      return serializeWrite(repo.root, () => pull(repo));
+    case "push":
+      return push(repo);
     case "stage":
     case "unstage":
     case "discard":

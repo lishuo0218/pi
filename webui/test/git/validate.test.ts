@@ -24,12 +24,16 @@ describe("parseRequest", () => {
       message: "msg",
       amend: true,
     });
+    // Network actions carry no fields at all.
+    for (const action of ["fetch", "pull", "push"]) {
+      expect(parseRequest({ action })).toEqual({ action });
+    }
   });
 
   it("refuses unknown actions and non-object bodies", () => {
     expect(parseRequest(null)).toBeNull();
     expect(parseRequest("status")).toBeNull();
-    expect(parseRequest({ action: "push" })).toBeNull();
+    expect(parseRequest({ action: "clone" })).toBeNull();
     expect(parseRequest({})).toBeNull();
   });
 

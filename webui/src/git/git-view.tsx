@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef } from "preact/hooks";
 import { useSyncExternalStore } from "preact/compat";
 import type { JSX } from "preact";
-import type { GitFile, GitSide } from "../../bridge/git/types";
+import type { GitFile, GitSide, GitStatus } from "../../bridge/git/types";
 import { GitChanges } from "./changes";
 import { GitCommitBox } from "./commit";
 import { GitDiffView, type HunkActions } from "./diff-view";
@@ -28,8 +28,24 @@ function setupMessage(error: string, code: string): string {
   }
 }
 
-export function GitView({ onClose }: { onClose: () => void }): JSX.Element {
-  const storeRef = useRef<GitStore | null>(null);
+/**
+ * Tooltip of a tracking button: the reason it is off, or what it would do. Both
+ * need a branch that tracks a remote, so the missing-upstream case names the one
+ * command that fixes it.
+ */
+function trackingHint(kind: "拉取" | "推送", status: GitStatus | null, enabled: boolean): string {
+  if (status === null) return `仓库状态未知，暂不能${kind}`;
+  if (status.detached) return `游离 HEAD 状态无法${kind}`;
+  if (status.upstream === null) {
+    return `当前分支没有上游，先在终端执行 git push -u origin ${status.branch ?? "<分支>"}`;
+  }
+  if (kind === "推送") {
+    return enabled ? `推送 ${status.branch} 到 ${status.upstream}` : "没有待推送的提交";
+  }
+  return enabled ? `拉取 ${status.upstream}（仅快进，分叉时拒绝）` : "没有需要拉取的提交";
+}
+
+export function GitView({ onClose }: { onClose: () => void }): JSX.Element {  const storeRef = useRef<GitStore | null>(null);
   if (storeRef.current === null) storeRef.current = new GitStore();
   const store = storeRef.current;
   useSyncExternalStore(
@@ -61,6 +77,16 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {
   const status = store.readyStatus;
   const selection = store.selection;
   const diffState = store.diff;
+
+  // The tracking state behind the three network buttons. push and pull need a
+  // branch that tracks a remote, so they say why they are off instead of failing
+  // after a round trip.
+  const branch = status === null || status.detached || status.unborn ? null : status.branch;
+  const upstream = status === null ? null : status.upstream;
+  const tracked = branch !== null && upstream !== null;
+  const canFetch = status !== null && !store.busy;
+  const canPull = tracked && !store.busy && (status?.behind ?? 0) > 0;
+  const canPush = tracked && !store.busy && (status?.ahead ?? 0) > 0;
 
   const rows = useMemo(
     () => (diffState.kind === "ready" ? parsePatch(diffState.diff.text) : []),
@@ -126,6 +152,33 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {
           </span>
         )}
         <span class="gv-head-spacer" />
+        <button
+          class="gv-head-btn"
+          disabled={!canFetch}
+          title="获取远程更新（git fetch --prune）"
+          onClick={() => void store.fetchRemote()}
+        >
+          获取
+        </button>
+        <button
+          class="gv-head-btn"
+          disabled={!canPull}
+          title={trackingHint("拉取", status, canPull)}
+          onClick={() => void store.pull()}
+        >
+          拉取
+        </button>
+        <button
+          class="gv-head-btn gv-primary"
+          disabled={!canPush}
+          title={trackingHint("推送", status, canPush)}
+          onClick={() => {
+            if (branch !== null && upstream !== null) store.requestPush(branch, upstream);
+          }}
+        >
+          推送
+          {status === null || status.ahead === 0 ? "" : ` ${status.ahead}`}
+        </button>
         <button class="gv-head-btn" title="刷新" onClick={() => void store.refreshStatus()}>
           刷新
         </button>

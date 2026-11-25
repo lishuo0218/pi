@@ -294,6 +294,27 @@ export class GitStore {
     return this.runWrite("暂存", { action: "stage", paths });
   }
 
+  /** Refresh remote-tracking refs; ahead/behind comes back with the status. */
+  fetchRemote(): Promise<boolean> {
+    return this.runWrite("获取", { action: "fetch" });
+  }
+
+  /** Fast-forward only: a diverged branch is refused instead of merged. */
+  async pull(): Promise<boolean> {
+    const ok = await this.runWrite("拉取", { action: "pull" });
+    if (ok && this.history.kind === "ready") await this.loadHistory(false);
+    return ok;
+  }
+
+  push(): Promise<boolean> {
+    return this.runWrite("推送", { action: "push" });
+  }
+
+  /** Pushing publishes commits to a remote, so it asks first. */
+  requestPush(branch: string, upstream: string): void {
+    this.requestConfirm(`推送 ${branch} 到 ${upstream}？`, "推送", () => void this.push());
+  }
+
   unstage(paths: string[]): Promise<boolean> {
     return this.runWrite("取消暂存", { action: "unstage", paths });
   }

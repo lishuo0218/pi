@@ -71,6 +71,12 @@ export function parseRequest(body: unknown): GitRequest | null {
     }
     case "draftMessage":
       return { action: "draftMessage" };
+    case "fetch":
+      return { action: "fetch" };
+    case "pull":
+      return { action: "pull" };
+    case "push":
+      return { action: "push" };
     case "stage":
     case "unstage": {
       const paths = asPaths(body.paths);

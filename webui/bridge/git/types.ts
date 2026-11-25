@@ -100,6 +100,9 @@ export type GitRequest =
   | { action: "commitDiff"; sha: string }
   | { action: "log"; limit: number; skip: number }
   | { action: "draftMessage" }
+  | { action: "fetch" }
+  | { action: "pull" }
+  | { action: "push" }
   | { action: "stage"; paths: string[] }
   | { action: "unstage"; paths: string[] }
   | {

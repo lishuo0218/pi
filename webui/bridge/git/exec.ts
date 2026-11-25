@@ -118,15 +118,22 @@ export function succeeded(run: GitRun): boolean {
   return run.spawnError === null && !run.timedOut && run.code === 0;
 }
 
-/** First non-empty line of stderr, or a fallback naming the failed command. */
+/**
+ * The line that explains a failed command. git writes the cause on a `fatal:` or
+ * `error:` line, after progress chatter such as the `From <remote>` header of a
+ * failed pull, so that line wins over the first one. Among several, the first is
+ * the specific one: an unreachable path leads with "'<path>' does not appear to
+ * be a git repository" and only then adds the generic read failure.
+ */
 export function errorText(run: GitRun, label: string): string {
   if (run.spawnError) return `cannot run git: ${run.spawnError}`;
   if (run.timedOut) return `${label} timed out`;
-  const line = run.stderr
+  const lines = run.stderr
     .split("\n")
     .map((part) => part.trim())
-    .find((part) => part.length > 0);
-  return line ?? `${label} failed (exit ${run.code ?? "?"})`;
+    .filter((part) => part.length > 0);
+  const cause = lines.find((line) => /^(fatal|error)\b/i.test(line) || /^(致命错误|错误)[:：]/.test(line));
+  return cause ?? lines[0] ?? `${label} failed (exit ${run.code ?? "?"})`;
 }
 
 /** Classify a failure so the page can offer a next step instead of a dead end. */
