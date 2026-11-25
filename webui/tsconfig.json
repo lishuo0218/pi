@@ -16,5 +16,5 @@
     "verbatimModuleSyntax": true,
     "noEmit": true
   },
-  "include": ["bridge", "src"]
+  "include": ["bridge", "src", "test", "vitest.config.ts"]
 }

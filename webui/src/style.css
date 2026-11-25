@@ -42,6 +42,9 @@
   --hl-attr: #116329;
   --hl-type: #953800;
   --hl-deletion: #82071e;
+  /* 查找命中背景（代码查看器） */
+  --mark-bg: #fdf0a8;
+  --mark-current: #f7c948;
   /* 字体 */
   --font-sans: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, "SFMono-Regular", monospace;
@@ -80,6 +83,8 @@
   --hl-attr: #e06c75;
   --hl-type: #e5c07b;
   --hl-deletion: #e06c75;
+  --mark-bg: #4a4020;
+  --mark-current: #8a6d15;
   color-scheme: dark;
 }
 
@@ -287,10 +292,28 @@ body {
 }
 .thinking .body {
   margin-top: 6px;
-  white-space: pre-wrap;
   /* Expanded thinking is capped, it scrolls inside instead of pushing the stream: the tail follows while live. */
   max-height: 40vh;
   overflow-y: auto;
+}
+/* 思考正文按 markdown 渲染：字号跟随 thinking，标题不放大。 */
+.thinking .md-body {
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 0;
+}
+.thinking .md-body h1,
+.thinking .md-body h2,
+.thinking .md-body h3,
+.thinking .md-body h4 {
+  font-size: 13px;
+  margin: 10px 0 4px;
+}
+.thinking .md-body pre {
+  padding: var(--sp-2) var(--sp-3);
+}
+.thinking .md-body pre code {
+  font-size: 12px;
 }
 .thinking:not(.open) .body {
   display: none;
@@ -2319,18 +2342,42 @@ body {
   font-weight: 700;
 }
 
-/* === 右侧侧栏（上：Agent ToDo 清单；下：工作目录文件树） === */
+/* === 右侧侧栏（上：Agent ToDo 清单；下：工作目录文件树） ===
+   打开文件后整条栏切换成预览，宽度改为可拖拽（见 .side-resizer）。 */
 .side-panel {
   position: absolute;
   right: 0;
   top: 56px;
   bottom: 0;
-  width: 300px;
+  width: var(--todo-w, 300px);
   background: var(--c-bg);
   border-left: 1px solid var(--c-border);
   display: flex;
   flex-direction: column;
   z-index: 30;
+}
+/* 预览时左边缘的拖拽手柄 */
+.side-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.side-resizer:hover {
+  background: var(--c-border);
+}
+/* ToDo 与文件树保留在 DOM 里（切回来时不丢展开状态），预览时仅隐藏 */
+.side-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.side-view.gone {
+  display: none;
 }
 .side-section {
   display: flex;
@@ -2388,12 +2435,276 @@ body {
   background: var(--c-bg-subtle);
   color: var(--c-fg);
 }
+/* 预览头部的返回按钮，与关闭按钮同尺寸，但不右推 */
+.side-icon-btn {
+  border: none;
+  background: transparent;
+  color: var(--c-fg-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+}
+.side-icon-btn:hover {
+  background: var(--c-bg-subtle);
+  color: var(--c-fg);
+}
 .side-empty {
   padding: 14px 12px;
   font-size: 12px;
   line-height: 1.6;
   color: var(--c-fg-tertiary);
 }
+/* === 文件预览：侧栏内容（头部返回 + 正文 + 底部信息） === */
+.preview-section {
+  flex: 1 1 auto;
+}
+.preview-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--c-border);
+  min-width: 0;
+}
+.preview-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+/* === 代码查看器：固定行号栏、虚拟滚动、查找命中高亮 === */
+.viewer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.viewer-bar {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--c-border);
+}
+.viewer-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--c-fg-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.viewer-btn:hover:not(:disabled) {
+  background: var(--c-bg-subtle);
+  color: var(--c-fg);
+}
+.viewer-btn.active {
+  background: var(--c-bg-subtle);
+  border-color: var(--c-border);
+  color: var(--c-fg);
+}
+.viewer-btn:disabled {
+  color: var(--c-fg-tertiary);
+  cursor: default;
+}
+.viewer-find {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--c-border);
+}
+.viewer-find input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-bg-inset);
+  color: var(--c-fg);
+  font: inherit;
+  font-size: 12px;
+}
+.viewer-find input:focus {
+  outline: none;
+  border-color: var(--c-border-strong);
+}
+.viewer-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--c-fg-tertiary);
+  white-space: nowrap;
+}
+/* 行高 18px 与 code-viewer.tsx 的 LINE_HEIGHT 一致：虚拟滚动靠它算偏移 */
+.viewer-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--c-bg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.viewer-lines {
+  position: relative;
+  min-width: 100%;
+  width: max-content;
+}
+/* 换行模式下内容不能撑到 max-content，否则永远不换行 */
+.viewer.wrap .viewer-lines {
+  width: auto;
+}
+.viewer-row {
+  display: flex;
+  height: 18px;
+  line-height: 18px;
+}
+.viewer.wrap .viewer-row {
+  height: auto;
+}
+/* 行号栏随横向滚动固定在左侧 */
+.viewer-num {
+  position: sticky;
+  left: 0;
+  flex: none;
+  min-width: 3.4em;
+  padding: 0 8px 0 10px;
+  text-align: right;
+  color: var(--c-fg-tertiary);
+  background: var(--c-bg);
+  border-right: 1px solid var(--c-border);
+  user-select: none;
+}
+.viewer-text {
+  flex: none;
+  padding: 0 14px 0 10px;
+  white-space: pre;
+}
+.viewer.wrap .viewer-text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.search-hit {
+  background: var(--mark-bg);
+  color: inherit;
+  border-radius: 2px;
+}
+.search-hit.current {
+  background: var(--mark-current);
+}
+.preview-note {
+  flex: none;
+  padding: 14px 12px;
+  font-size: 12.5px;
+  color: var(--c-fg-secondary);
+}
+.preview-note.err {
+  color: var(--c-error);
+  word-break: break-word;
+}
+.preview-image-wrap {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+}
+.preview-image {
+  max-width: 100%;
+  border-radius: var(--r-sm);
+  background: var(--c-bg-inset);
+}
+.preview-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: 8px 12px;
+  border-top: 1px solid var(--c-border);
+  font-size: 11.5px;
+  color: var(--c-fg-tertiary);
+}
+.preview-meta {
+  font-family: var(--font-mono);
+}
+.preview-truncated {
+  color: var(--c-warning);
+}
+/* Markdown 预览：渲染后的正文代替源码，图片按 md 所在目录解析后内联。 */
+.preview-view-toggle {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 1px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+}
+.preview-view-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--c-fg-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.preview-view-toggle button.active {
+  background: var(--c-bg-inset);
+  color: var(--c-fg);
+}
+.preview-md {
+  padding: var(--sp-3) var(--sp-4) var(--sp-5);
+  font-size: 14px;
+}
+.preview-md .md-body {
+  font-size: 14px;
+  line-height: 1.65;
+}
+.preview-md .md-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 6px 0;
+  border-radius: var(--r-sm);
+}
+/* A local image that could not be read shows its alt text instead. */
+.preview-md .md-body img.md-img-missing {
+  display: inline;
+  font-size: 12px;
+  color: var(--c-fg-tertiary);
+}
+.preview-md .md-body h1 {
+  font-size: 20px;
+}
+.preview-md .md-body h2 {
+  font-size: 17px;
+}
+.preview-md .md-body h3,
+.preview-md .md-body h4 {
+  font-size: 15px;
+}
+.preview-md .md-body a {
+  color: var(--c-fg);
+  text-decoration: underline;
+  text-decoration-color: var(--c-fg-tertiary);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.preview-md .md-body a:hover {
+  text-decoration-color: var(--c-fg);
+}
+
 /* 一轮的改动卡片：消息流内每轮末尾一张，默认折叠成一行。 */
 .turn-files-card {
   border: 1px solid var(--c-border);
@@ -2489,7 +2800,7 @@ body {
   color: var(--c-fg-tertiary);
 }
 .tree-row.file-row {
-  cursor: default;
+  cursor: pointer;
 }
 .tree-name {
   flex: 1;
@@ -2573,4 +2884,681 @@ body {
 }
 .file-item:hover {
   background: var(--c-bg-subtle);
+}
+/* === Git 视图（全屏，F-29）=== */
+/* 尺寸基准：文件行 22px、diff 行 18px（与 diff-view.tsx 的 LINE_HEIGHT 一致）、
+   改动栏 340px、历史栏 280px。三栏用底色与 1px 分隔线分层；选中态统一为
+   2px 左侧竖条 + 底色；按钮只有一种：无边框文字按钮，悬停才出底色，
+   危险操作悬停变红。 */
+.gv {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--c-bg);
+  color: var(--c-fg);
+}
+
+/* 顶栏 */
+.gv-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 44px;
+  padding: 0 var(--sp-3);
+  background: var(--c-bg-subtle);
+  border-bottom: 1px solid var(--c-border);
+}
+.gv-head-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.gv-head-spacer {
+  flex: 1;
+}
+.gv-branch {
+  flex: none;
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-fg-secondary);
+  background: var(--c-bg-inset);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+}
+
+/* 按钮：一个基类，靠字号与内距分大小；危险操作只在悬停时变红 */
+.gv-head-btn,
+.gv-mini,
+.gv-primary,
+.gv-danger {
+  border: 0;
+  background: transparent;
+  color: var(--c-fg-secondary);
+  font: inherit;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  transition:
+    background-color 0.08s,
+    color 0.08s;
+}
+.gv-head-btn {
+  font-size: 12px;
+  padding: 6px 9px;
+}
+.gv-mini {
+  font-size: 11px;
+  padding: 3px 7px;
+}
+.gv-primary {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-fg);
+  padding: 5px 10px;
+}
+.gv-danger {
+  font-size: 12px;
+  padding: 6px 11px;
+}
+.gv-head-btn:hover:not(:disabled),
+.gv-mini:hover:not(:disabled),
+.gv-primary:hover:not(:disabled),
+.gv-danger:hover:not(:disabled) {
+  background: var(--c-bg-inset);
+  color: var(--c-fg);
+}
+.gv-mini.danger:hover:not(:disabled),
+.gv-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--c-error) 12%, transparent);
+  color: var(--c-error);
+}
+.gv-head-btn:disabled,
+.gv-mini:disabled,
+.gv-primary:disabled,
+.gv-danger:disabled {
+  color: var(--c-fg-tertiary);
+  cursor: default;
+}
+
+/* 状态条：成功提示 / 警告横幅共用一条通栏 */
+.gv-notice,
+.gv-banner {
+  flex: none;
+  padding: 6px var(--sp-3);
+  font-size: 12px;
+  border-bottom: 1px solid var(--c-border);
+}
+.gv-notice {
+  color: var(--c-success);
+  background: color-mix(in srgb, var(--c-success) 12%, transparent);
+}
+.gv-notice.err {
+  color: var(--c-error);
+  background: color-mix(in srgb, var(--c-error) 12%, transparent);
+}
+.gv-banner {
+  color: var(--c-warning);
+  background: color-mix(in srgb, var(--c-warning) 12%, transparent);
+}
+
+/* 改动栏与历史栏：两栏共用底色与分隔线，各自滚动，都不带折叠标题行 */
+.gv-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.gv-side {
+  flex: none;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--c-bg-subtle);
+  border-right: 1px solid var(--c-border);
+  padding-bottom: var(--sp-2);
+}
+.gv-history {
+  flex: none;
+  width: 280px;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--c-bg-subtle);
+  border-right: 1px solid var(--c-border);
+}
+.gv-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gv-main-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 34px;
+  padding: 3px var(--sp-2) 3px var(--sp-3);
+  border-bottom: 1px solid var(--c-border);
+}
+.gv-main-title {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gv-main-subject {
+  margin-left: var(--sp-2);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gv-main-meta {
+  margin-left: var(--sp-2);
+  font-size: 11px;
+  color: var(--c-fg-tertiary);
+  white-space: nowrap;
+}
+.gv-main-actions {
+  display: flex;
+  gap: 1px;
+}
+.gv-chip {
+  flex: none;
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--c-bg-inset);
+  color: var(--c-fg-secondary);
+}
+.gv-chip.warn {
+  color: var(--c-error);
+  background: color-mix(in srgb, var(--c-error) 12%, transparent);
+}
+
+/* 分组（冲突 / 已暂存 / 改动 / 未跟踪）与文件行 */
+.gv-caret {
+  flex: none;
+  width: 8px;
+  font-size: 8px;
+  line-height: 1;
+  transition: transform 0.12s;
+}
+.gv-caret.open {
+  transform: rotate(90deg);
+}
+.gv-badge {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--c-fg-tertiary);
+  background: var(--c-bg-inset);
+  padding: 1px 5px;
+  border-radius: var(--r-pill);
+}
+.gv-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 22px;
+  padding: 0 var(--sp-1) 0 var(--sp-2);
+}
+.gv-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-fg-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.gv-group-toggle:hover {
+  color: var(--c-fg);
+}
+.gv-group-title {
+  flex: none;
+}
+.gv-group-actions {
+  flex: none;
+  display: flex;
+  gap: 1px;
+}
+
+/* 分组之间留 2px，冲突 / 已暂存 / 改动 / 未跟踪 才不至于连成一片 */
+.gv-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* flex 列的子项默认 min-width: auto，会顶掉路径的省略号 */
+.gv-group {
+  min-width: 0;
+}
+
+/* 文件行：标记 + 路径 + 增删数 + 行内操作 */
+.gv-file {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 var(--sp-1) 0 9px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  outline: none;
+}
+.gv-file:hover {
+  background: var(--c-bg-inset);
+}
+.gv-file:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--c-border-strong);
+}
+.gv-file.active {
+  background: color-mix(in srgb, var(--c-fg) 8%, transparent);
+  border-left-color: var(--c-fg);
+}
+.gv-code {
+  flex: none;
+  width: 9px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--c-warning);
+}
+.gv-file.conflict .gv-code {
+  color: var(--c-error);
+}
+.gv-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.gv-dir {
+  color: var(--c-fg-tertiary);
+}
+.gv-stats {
+  flex: none;
+  display: flex;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.gv-add-count {
+  color: var(--c-success);
+}
+.gv-del-count {
+  color: var(--c-error);
+}
+/* 行内操作始终在位，平时压到 tertiary，悬停该行才提到 secondary */
+.gv-row-actions {
+  flex: none;
+  display: flex;
+  gap: 1px;
+}
+.gv-row-actions .gv-mini {
+  padding: 3px 5px;
+  color: var(--c-fg-tertiary);
+}
+.gv-file:hover .gv-row-actions .gv-mini,
+.gv-file:focus-visible .gv-row-actions .gv-mini {
+  color: var(--c-fg-secondary);
+}
+
+/* 提交框 */
+.gv-commit-box {
+  flex: none;
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--c-border);
+}
+/* 提交框顶部工具行：AI 生成按钮靠右，不占输入框的行 */
+.gv-commit-head {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+.gv-commit-input {
+  display: block;
+  width: 100%;
+  min-height: 54px;
+  max-height: 40vh;
+  resize: vertical;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-bg);
+  color: var(--c-fg);
+  outline: none;
+}
+.gv-commit-input::placeholder {
+  color: var(--c-fg-tertiary);
+}
+.gv-commit-input:focus {
+  border-color: var(--c-border-strong);
+}
+.gv-commit-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: 6px;
+}
+.gv-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--c-fg-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gv-check input {
+  accent-color: var(--c-fg);
+}
+.gv-commit-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--c-fg-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 历史：sha + 标题两行，作者与时间放 title；选中态与文件行一致 */
+.gv-log {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--sp-1);
+}
+.gv-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.4;
+  padding: 5px var(--sp-2) 5px 9px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  outline: none;
+}
+.gv-commit:hover {
+  background: var(--c-bg-inset);
+}
+.gv-commit:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--c-border-strong);
+}
+.gv-commit.active {
+  background: color-mix(in srgb, var(--c-fg) 8%, transparent);
+  border-left-color: var(--c-fg);
+}
+.gv-commit-sha {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--c-fg-tertiary);
+}
+.gv-commit-subject {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gv-more {
+  display: block;
+  width: 100%;
+  height: 26px;
+  border: 0;
+  background: none;
+  color: var(--c-fg-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.gv-more:hover:not(:disabled) {
+  background: var(--c-bg-inset);
+  color: var(--c-fg);
+}
+.gv-more:disabled {
+  color: var(--c-fg-tertiary);
+  cursor: default;
+}
+
+/* 空态与初始化失败 */
+.gv-empty {
+  margin: 0;
+  padding: 8px 9px;
+  font-size: 12px;
+  color: var(--c-fg-tertiary);
+}
+.gv-empty.pad {
+  margin: auto;
+  padding: var(--sp-5);
+  text-align: center;
+}
+.gv-empty.err {
+  color: var(--c-error);
+}
+.gv-setup {
+  margin: auto;
+  max-width: 460px;
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.gv-setup-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.gv-setup-detail {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--c-fg-tertiary);
+  word-break: break-all;
+}
+
+/* diff 面板 */
+.gv-diff {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gv-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-fg-tertiary);
+}
+/* diff 工具条沿用代码查看器的 .viewer-* 组件，只在这里对齐内距与悬停色 */
+.gv-diff .viewer-bar,
+.gv-diff .viewer-find {
+  gap: 2px;
+  padding: 3px var(--sp-2);
+}
+.gv-diff .viewer-btn {
+  padding: 4px 7px;
+}
+.gv-diff .viewer-btn:hover:not(:disabled),
+.gv-diff .viewer-btn.active {
+  background: var(--c-bg-inset);
+  border-color: transparent;
+  color: var(--c-fg);
+}
+.gv-diff .viewer-find input {
+  background: var(--c-bg);
+}
+/* 行高 18px 与 diff-view.tsx 的 LINE_HEIGHT 一致：虚拟滚动靠它算偏移。
+   行底色放进 --row-bg，行号与标记栏跟着它上色，横向滚动时挡住了背后文字 */
+.gv-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--c-bg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.gv-lines {
+  position: relative;
+  min-width: 100%;
+  width: max-content;
+}
+.gv-line {
+  --row-bg: var(--c-bg);
+  --gv-num: 3.4em;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  line-height: 18px;
+  background: var(--row-bg);
+}
+.gv-add {
+  --row-bg: color-mix(in srgb, var(--c-success) 12%, var(--c-bg));
+}
+.gv-del {
+  --row-bg: color-mix(in srgb, var(--c-error) 12%, var(--c-bg));
+}
+.gv-ctx {
+  --row-bg: var(--c-bg);
+}
+.gv-hunk {
+  --row-bg: color-mix(in srgb, var(--c-fg) 5%, var(--c-bg));
+  color: var(--c-fg-secondary);
+}
+.gv-fold {
+  --row-bg: var(--c-bg-subtle);
+}
+.gv-num {
+  position: sticky;
+  left: 0;
+  flex: none;
+  width: var(--gv-num);
+  padding: 0 6px;
+  text-align: right;
+  color: var(--c-fg-tertiary);
+  background: var(--row-bg);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.gv-num + .gv-num {
+  left: var(--gv-num);
+}
+.gv-mark {
+  position: sticky;
+  left: calc(var(--gv-num) * 2);
+  flex: none;
+  width: 1.6em;
+  text-align: center;
+  color: var(--c-fg-tertiary);
+  background: var(--row-bg);
+  border-right: 1px solid var(--c-border);
+  user-select: none;
+}
+.gv-add .gv-mark {
+  color: var(--c-success);
+}
+.gv-del .gv-mark {
+  color: var(--c-error);
+}
+.gv-text {
+  flex: none;
+  padding: 0 12px 0 8px;
+  white-space: pre;
+}
+.gv-dim {
+  color: var(--c-fg-tertiary);
+}
+/* hunk 行的操作贴右：sticky 让它不被横向滚动带走，行底色挡住背后的长行 */
+.gv-hunk-actions {
+  position: sticky;
+  right: var(--sp-2);
+  margin-left: auto;
+  padding-left: var(--sp-2);
+  display: flex;
+  align-items: center;
+  background: var(--row-bg);
+}
+.gv-hunk-btns {
+  display: flex;
+  gap: 1px;
+}
+.gv-hunk-actions .gv-mini {
+  padding: 1px 6px;
+  font-size: 10px;
+}
+.gv-fold-btn {
+  flex: 1;
+  height: 18px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: var(--c-fg-secondary);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.gv-fold-btn:hover {
+  background: var(--c-bg-inset);
+  color: var(--c-fg);
+}
+
+/* 危险操作确认 */
+.gv-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+.gv-modal {
+  width: min(440px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+}
+.gv-modal-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.gv-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-1);
 }

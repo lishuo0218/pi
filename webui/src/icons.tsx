@@ -155,12 +155,35 @@ export function IconRefresh({ size = 14 }: IconProps): JSX.Element {
   );
 }
 
+/** File preview: an eye. */
+export function IconEye({ size = 13 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </Svg>
+  );
+}
+
 /** Copy to clipboard: two overlapping rounded sheets. */
 export function IconCopy(props: IconProps): JSX.Element {
   return (
     <Svg {...props}>
       <rect x="9" y="9" width="12" height="12" rx="2" />
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </Svg>
+  );
+}
+
+/** Git: a branch graph, one commit splitting into a second line. */
+export function IconGit({ size = 14 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <circle cx="6" cy="5" r="2.5" />
+      <circle cx="6" cy="19" r="2.5" />
+      <circle cx="18" cy="9" r="2.5" />
+      <path d="M6 7.5v9" />
+      <path d="M18 11.5c0 3.5-3.5 5-6.5 5.5" />
     </Svg>
   );
 }

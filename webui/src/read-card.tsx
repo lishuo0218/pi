@@ -11,7 +11,8 @@ import { CopyButton } from "./copy-button";
 import { PathLabel, relativeToCwd, splitPath } from "./path-label";
 import { getPiCwd, onPiCwdChange } from "./pi-cwd";
 import { langForPath, lineHtml } from "./highlight";
-import { IconRead } from "./icons";
+import { IconEye, IconRead } from "./icons";
+import { openPreview } from "./preview-target";
 
 /** pi's "[Showing lines 1-2000 of 5000 ...]" tail of a truncated read. */
 const SHOWING = /\n\n\[Showing lines (\d+)-(\d+) of (\d+)(?: \([^)]*\))?\. Use offset=\d+ to continue\.\]$/;
@@ -132,6 +133,12 @@ export function ReadCard({ exec }: { exec: ToolExecution }): JSX.Element {
       {note ? <div class="read-note">{note}</div> : null}
       {path !== "" || view.code !== "" ? (
         <div class="read-foot">
+          {path !== "" ? (
+            <button class="copy-btn" title="在预览列打开该文件" onClick={() => openPreview(path)}>
+              <IconEye size={12} />
+              预览
+            </button>
+          ) : null}
           {path !== "" ? <CopyButton text={path} label="复制路径" /> : null}
           {view.code !== "" ? <CopyButton text={view.code} label="复制内容" /> : null}
           {lines.length > 0 ? (

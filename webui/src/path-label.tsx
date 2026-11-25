@@ -20,6 +20,22 @@ export function toolPathArg(args: Record<string, unknown>): string | null {
   return typeof raw === "string" && raw !== "" ? raw : null;
 }
 
+/** Join a relative path onto a base directory, walking `..` up; an absolute
+ * path is returned as written. */
+export function joinPath(base: string, rel: string): string {
+  const relFwd = rel.replaceAll("\\", "/");
+  if (/^[a-zA-Z]:\//.test(relFwd) || relFwd.startsWith("/")) return relFwd;
+  const baseFwd = base.replaceAll("\\", "/");
+  const leading = baseFwd.startsWith("/") ? "/" : "";
+  const parts = baseFwd.split("/").filter((part) => part !== "");
+  for (const part of relFwd.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return leading + parts.join("/");
+}
+
 /** Shorten an absolute path under cwd to cwd-relative; null otherwise. */
 export function relativeToCwd(path: string, cwd: string | null): string | null {
   if (!cwd || !path) return null;

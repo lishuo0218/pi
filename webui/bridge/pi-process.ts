@@ -36,7 +36,7 @@ export function readPiVersion(piPath: string): Promise<string> {
  * bundle checkout, so run it with this Node binary; `.cmd`/`.bat` shims on
  * Windows cannot be spawned directly and go through cmd.exe.
  */
-function piInvocation(
+export function piInvocation(
   piPath: string,
   args: string[],
 ): { command: string; args: string[]; shell: boolean } {

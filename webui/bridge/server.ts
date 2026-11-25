@@ -5,7 +5,7 @@
 // M4: auto-restart (with backoff), optional access token, single-active-tab
 // takeover, export_html served over HTTP.
 import http from "node:http";
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { watch } from "node:fs";
@@ -18,6 +18,9 @@ import { sessionsDirFor, listAllSessions, listSessionsIn, type SessionGroup } fr
 import { serveStatic } from "./static-server.ts";
 import { handleEditPreview, readJsonBody } from "./edit-preview.ts";
 import { handleListDir } from "./list-dir.ts";
+import { handleFilePreview } from "./file-preview.ts";
+import { handleGit } from "./git/index.ts";
+import { handleGitEvents } from "./git/events.ts";
 
 export type BridgeOptions = {
   port: number;
@@ -40,10 +43,27 @@ export type BridgeHandle = {
   stop: () => void;
 };
 
-/** POST endpoints that read local files on behalf of the page (both cwd-scoped). */
-const LOCAL_READS: Record<string, (body: unknown, cwd: string) => Promise<unknown>> = {
-  "/api/edit-preview": handleEditPreview,
-  "/api/list-dir": handleListDir,
+/**
+ * POST endpoints that act on the local working directory on behalf of the page
+ * (cwd-scoped, token-gated). /api/git also runs write commands: every path,
+ * ref and branch name it accepts is validated in git/validate.ts.
+ */
+function localPosts(piPath: string): Record<string, (body: unknown, cwd: string) => Promise<unknown>> {
+  return {
+    "/api/edit-preview": handleEditPreview,
+    "/api/list-dir": handleListDir,
+    "/api/file-preview": handleFilePreview,
+    // The commit-message draft spawns this same pi executable, one-shot.
+    "/api/git": (body, cwd) => handleGit(body, cwd, piPath),
+  };
+}
+
+/**
+ * Streaming endpoints: they own the response for as long as it lives, so they
+ * are NOT awaited. /api/git/events pushes repository changes as SSE.
+ */
+const LOCAL_STREAMS: Record<string, (request: IncomingMessage, response: ServerResponse, cwd: string) => void> = {
+  "/api/git/events": handleGitEvents,
 };
 
 function checkToken(request: IncomingMessage, token: string | undefined): boolean {
@@ -57,10 +77,21 @@ function checkToken(request: IncomingMessage, token: string | undefined): boolea
 
 export function startBridge(opts: BridgeOptions): Promise<BridgeHandle> {
   return new Promise((resolve, reject) => {
+    const posts = localPosts(opts.piPath);
     const server = http.createServer((req, res) => {
       const url = (req.url ?? "/").split("?")[0] ?? "/";
-      const localRead = LOCAL_READS[url];
-      if (localRead && req.method === "POST") {
+      const localPost = posts[url];
+      const localStream = LOCAL_STREAMS[url];
+      if (localStream !== undefined && req.method === "GET") {
+        if (!checkToken(req, opts.token)) {
+          res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ error: "forbidden" }));
+          return;
+        }
+        localStream(req, res, pool.attached?.cwd ?? opts.cwd);
+        return;
+      }
+      if (localPost && req.method === "POST") {
         // Token-gated like /ws when a token is set: both endpoints read local
         // files on behalf of the page.
         if (!checkToken(req, opts.token)) {
@@ -69,7 +100,7 @@ export function startBridge(opts: BridgeOptions): Promise<BridgeHandle> {
           return;
         }
         readJsonBody(req, 1024 * 1024)
-          .then((body) => localRead(body, pool.attached?.cwd ?? opts.cwd))
+          .then((body) => localPost(body, pool.attached?.cwd ?? opts.cwd))
           .then(
             (result) => {
               res.writeHead(200, { "content-type": "application/json; charset=utf-8" });

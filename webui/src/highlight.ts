@@ -11,6 +11,7 @@ const EXT_LANG: Record<string, string> = {
   swift: "swift", php: "php", c: "c", h: "c", cpp: "cpp", cc: "cpp", hpp: "cpp",
   cs: "csharp", css: "css", scss: "scss", less: "less", html: "xml", htm: "xml",
   vue: "xml", svg: "xml", xml: "xml", json: "json", jsonc: "json", md: "markdown",
+  markdown: "markdown", mdown: "markdown", mkd: "markdown", mdx: "markdown",
   yml: "yaml", yaml: "yaml", toml: "ini", ini: "ini", cfg: "ini", sh: "bash",
   bash: "bash", zsh: "bash", bat: "dos", ps1: "powershell", sql: "sql",
   lua: "lua", pl: "perl", dart: "dart", ex: "elixir", exs: "elixir",
@@ -52,6 +53,9 @@ function escapeHtml(text: string): string {
 /** One highlighted run with its ancestor hljs class chain. */
 type HlToken = { text: string; chain: string[] };
 
+/** A run of a line with a class applied to it: a word change or a search hit. */
+export type LineRun = { text: string; cls: string | null };
+
 /** Flatten hljs HTML into text runs tagged with their class chains. */
 function tokenizeHl(html: string): HlToken[] {
   // Wrapped in a container: HTML parsing drops whitespace-only text nodes at
@@ -76,39 +80,46 @@ function tokenizeHl(html: string): HlToken[] {
 }
 
 /**
- * Render a line: syntax classes from hljs tokens, word-level highlight from
- * the segments overlaid as spans that reopen the syntax classes inside.
- * Segments cover the whole line, so tokens and segments advance in lockstep.
+ * Render a line: syntax classes from hljs tokens, with the given runs (word
+ * changes, search hits) overlaid as spans that reopen the syntax classes
+ * inside. Runs cover the whole line, so tokens and runs advance in lockstep;
+ * an empty list means no overlay.
  */
-export function lineHtml(text: string, lang: string | undefined, segs: WordSeg[] | null, segKind: "add" | "del" | null): string {
+export function markedLineHtml(text: string, lang: string | undefined, runs: LineRun[]): string {
   const hl = highlightLine(text, lang);
   const tokens: HlToken[] = hl !== "" ? tokenizeHl(hl) : [{ text, chain: [] }];
-  const emit = (chunk: string, chain: string[], word: boolean): string => {
+  const emit = (chunk: string, chain: string[], cls: string | null): string => {
     let inner = escapeHtml(chunk);
     for (let i = chain.length - 1; i >= 0; i--) inner = `<span class="${chain[i]!}">${inner}</span>`;
-    return word ? `<span class="diff-word ${segKind}">${inner}</span>` : inner;
+    return cls === null ? inner : `<span class="${cls}">${inner}</span>`;
   };
-  if (!segs) return tokens.map((token) => emit(token.text, token.chain, false)).join("");
+  if (runs.length === 0) return tokens.map((token) => emit(token.text, token.chain, null)).join("");
   let out = "";
   let tokenIndex = 0;
   let tokenOffset = 0;
-  let segIndex = 0;
-  let segOffset = 0;
+  let runIndex = 0;
+  let runOffset = 0;
   while (tokenIndex < tokens.length) {
     const token = tokens[tokenIndex]!;
-    const seg = segs[segIndex]!;
-    const available = Math.min(token.text.length - tokenOffset, seg.text.length - segOffset);
-    out += emit(token.text.slice(tokenOffset, tokenOffset + available), token.chain, seg.changed);
+    const run = runs[runIndex]!;
+    const available = Math.min(token.text.length - tokenOffset, run.text.length - runOffset);
+    out += emit(token.text.slice(tokenOffset, tokenOffset + available), token.chain, run.cls);
     tokenOffset += available;
-    segOffset += available;
+    runOffset += available;
     if (tokenOffset >= token.text.length) {
       tokenIndex++;
       tokenOffset = 0;
     }
-    if (segOffset >= seg.text.length) {
-      segIndex++;
-      segOffset = 0;
+    if (runOffset >= run.text.length) {
+      runIndex++;
+      runOffset = 0;
     }
   }
   return out;
+}
+
+/** Render a diff line: word-level change runs inside the syntax colours. */
+export function lineHtml(text: string, lang: string | undefined, segs: WordSeg[] | null, segKind: "add" | "del" | null): string {
+  const runs = segs === null ? [] : segs.map((seg) => ({ text: seg.text, cls: seg.changed ? `diff-word ${segKind}` : null }));
+  return markedLineHtml(text, lang, runs);
 }

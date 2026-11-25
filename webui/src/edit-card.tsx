@@ -12,7 +12,8 @@ import { getPiCwd, onPiCwdChange } from "./pi-cwd";
 import { diffWords, type WordSeg } from "./diff-engine";
 import { langForPath, lineHtml } from "./highlight";
 import { PathLabel, relativeToCwd, splitPath, toolPathArg } from "./path-label";
-import { IconColumns, IconEdit } from "./icons";
+import { IconColumns, IconEdit, IconEye } from "./icons";
+import { openPreview } from "./preview-target";
 
 type Row =
   | { kind: "skip" }
@@ -371,6 +372,19 @@ export function EditCard({ exec }: { exec: ToolExecution }): JSX.Element {
         {running && diff === undefined ? <span class="edit-pending">预览计算中…</span> : null}
         {exec.durationMs != null && !running ? (
           <span class="tool-duration">{(exec.durationMs / 1000).toFixed(1)}s</span>
+        ) : null}
+        {meta.raw ? (
+          <button
+            class="edit-layout"
+            title="预览该文件"
+            onClick={(e) => {
+              e.stopPropagation();
+              openPreview(meta.raw);
+            }}
+          >
+            <IconEye size={12} />
+            预览
+          </button>
         ) : null}
         {diff !== undefined ? (
           <button

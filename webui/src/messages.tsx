@@ -76,9 +76,7 @@ export function ThinkingBlock({
         <IconThinking />
         {live ? "思考中…" : "已思考"}
       </div>
-      <div class="body" ref={bodyRef}>
-        {content.thinking}
-      </div>
+      <div class="body md-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: renderMarkdown(content.thinking) }} />
     </div>
   );
 }

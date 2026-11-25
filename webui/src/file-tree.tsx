@@ -1,9 +1,10 @@
 // File browser for the agent's working directory: each folder is read from the
 // bridge only when it is opened, so .git or node_modules cost nothing until
-// asked for. Files are shown, not opened.
+// asked for. Clicking a file opens it in the preview column.
 import { useEffect, useState } from "preact/hooks";
 import type { JSX } from "preact";
 import { FileIcon } from "./file-icon";
+import { openPreview } from "./preview-target";
 import { IconFolder, IconFolderOpen, IconRefresh } from "./icons";
 import type { Theme } from "./theme";
 
@@ -164,10 +165,15 @@ function DirChildren({
         }
         return (
           <li key={entry.name} class="tree-node">
-            <div class="tree-row file-row" style={indent(depth)} title={childPath}>
+            <button
+              class="tree-row file-row"
+              style={indent(depth)}
+              title={childPath}
+              onClick={() => openPreview(childPath)}
+            >
               <FileIcon path={childPath} theme={theme} />
               <span class="tree-name">{entry.name}</span>
-            </div>
+            </button>
           </li>
         );
       })}

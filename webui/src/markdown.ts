@@ -77,15 +77,16 @@ function sanitize(html: string): string {
 }
 
 const renderCache = new Map<string, string>();
+const fileCache = new Map<string, string>();
 const CACHE_LIMIT = 200;
 
-/** Render markdown to sanitized HTML; results cached by source text. */
-export function renderMarkdown(text: string): string {
-  const cached = renderCache.get(text);
-  if (cached !== undefined) return cached;
+/** Rendered HTML, cached by source text; parse failures become escaped text. */
+function cached(text: string, cache: Map<string, string>, parse: () => string): string {
+  const hit = cache.get(text);
+  if (hit !== undefined) return hit;
   let html: string;
   try {
-    html = sanitize(marked.parse(text, { async: false }));
+    html = sanitize(parse());
   } catch {
     // Parse failure falls back to escaped plain text.
     const escaped = text
@@ -94,10 +95,21 @@ export function renderMarkdown(text: string): string {
       .replaceAll(">", "&gt;");
     html = `<p>${escaped.replaceAll("\n", "<br>")}</p>`;
   }
-  if (renderCache.size >= CACHE_LIMIT) {
-    const first = renderCache.keys().next().value;
-    if (first !== undefined) renderCache.delete(first);
+  if (cache.size >= CACHE_LIMIT) {
+    const first = cache.keys().next().value;
+    if (first !== undefined) cache.delete(first);
   }
-  renderCache.set(text, html);
+  cache.set(text, html);
   return html;
+}
+
+/** Render markdown to sanitized HTML; results cached by source text. */
+export function renderMarkdown(text: string): string {
+  return cached(text, renderCache, () => marked.parse(text, { async: false }));
+}
+
+/** Render a markdown file: GitHub line breaks (a single newline is a space),
+ * unlike assistant text where a newline is a line break. */
+export function renderMarkdownFile(text: string): string {
+  return cached(text, fileCache, () => marked.parse(text, { async: false, breaks: false }));
 }

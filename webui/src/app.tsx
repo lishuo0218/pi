@@ -1,6 +1,7 @@
 // Root app (M3): M1/M2 features plus session panel (F-20/F-21), fork
 // (F-21), slash command autocomplete (F-22), extension UI mapping (F-23),
-// bash panel (F-24), compaction + context usage (F-25), retry banner (F-26).
+// bash panel (F-24), Git drawer, compaction + context usage (F-25), retry
+// banner (F-26), full-screen Git view (F-29).
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useSyncExternalStore } from "preact/compat";
 import { Fragment, type JSX } from "preact";
@@ -14,9 +15,12 @@ import { turnPreview } from "./turn-preview";
 import { ExtensionDialog, StatusChips, WidgetArea } from "./extension-ui";
 import { Sidebar } from "./sidebar";
 import { RightPanel } from "./right-panel";
+import { getPreviewWidth, onPreviewWidthChange } from "./panel-width";
+import { closePreview, getPreviewRequest, onPreviewChange } from "./preview-target";
 import { Logo } from "./logo";
-import { IconImage, IconMenu, IconMoon, IconSun, IconColumns } from "./icons";
+import { IconGit, IconImage, IconMenu, IconMoon, IconSun, IconColumns } from "./icons";
 import { BashPanel } from "./bash-panel";
+import { GitView } from "./git/git-view";
 import { sessionFiles } from "./session-files";
 import { TurnFilesCard } from "./turn-files-card";
 import { getPiCwd } from "./pi-cwd";
@@ -69,7 +73,14 @@ export function App(): JSX.Element {
   const [contextUsage, setContextUsage] = useState<ContextUsage>(null);
   const [sessionTotals, setSessionTotals] = useState<{ input: number; output: number; cost: number } | null>(null);
   const [showBash, setShowBash] = useState(false);
+  const [showGit, setShowGit] = useState(false);
   const [todoOpen, setTodoOpen] = useState(true);
+  // The panel's file preview is opened from leaf components (file tree, tool
+  // cards) through preview-target.ts, so the root only subscribes to it.
+  const [preview, setPreview] = useState(getPreviewRequest);
+  useEffect(() => onPreviewChange(() => setPreview(getPreviewRequest())), []);
+  const [previewWidth, setPreviewWidth] = useState(getPreviewWidth);
+  useEffect(() => onPreviewWidthChange(() => setPreviewWidth(getPreviewWidth())), []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [injected, setInjected] = useState<{ v: number; text: string } | null>(null);
   const [readOnly, setReadOnly] = useState(false);
@@ -84,11 +95,13 @@ export function App(): JSX.Element {
     document.documentElement.style.setProperty("--sidebar-w", sidebarOpen ? "260px" : "0px");
   }, [sidebarOpen]);
 
-  // The right panel (ToDo + changed files) occupies a fixed-width strip on
-  // the right edge.
+  // The right panel occupies a strip on the right edge: the ToDo and file tree
+  // view at a fixed width, a file preview at its dragged width.
+  const panelOpen = todoOpen || preview !== null;
   useLayoutEffect(() => {
-    document.documentElement.style.setProperty("--todo-w", todoOpen ? "300px" : "0px");
-  }, [todoOpen]);
+    const width = preview === null ? 300 : previewWidth;
+    document.documentElement.style.setProperty("--todo-w", panelOpen ? `${width}px` : "0px");
+  }, [panelOpen, preview, previewWidth]);
 
   const pushToast = (text: string, err = false): void => {
     const id = ++toastSeq.current;
@@ -186,6 +199,8 @@ export function App(): JSX.Element {
       }
       store.hydrate(messages, store.state);
     }
+    // A session (and possibly cwd) switch invalidates the open preview path.
+    closePreview();
     // get_messages has no in-progress message: ask the bridge to replay the
     // records of the turn still streaming (page reload / session switch in
     // the middle of a run). They arrive before this response and land in the
@@ -210,6 +225,7 @@ export function App(): JSX.Element {
         if (cwd) {
           setPiCwd(cwd);
           reportPiCwd(cwd);
+          closePreview();
         }
         if (piExitedRef.current) {
           pushToast("pi 已重启，正在恢复会话");
@@ -451,13 +467,28 @@ export function App(): JSX.Element {
           const res = await conn.command({ type: "compact" });
           if (!res.success) pushToast(res.error ?? "压缩失败", true);
         }}
-        onToggleBash={() => setShowBash(!showBash)}
+        onToggleBash={() => {
+          setShowBash(!showBash);
+          setShowGit(false);
+        }}
+        gitOpen={showGit}
+        onToggleGit={() => {
+          setShowGit(!showGit);
+          setShowBash(false);
+        }}
         onToggleTheme={() => setTheme(toggleTheme())}
         theme={theme}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        todoOpen={todoOpen}
-        onToggleTodo={() => setTodoOpen(!todoOpen)}
+        todoOpen={panelOpen}
+        onToggleTodo={() => {
+          if (panelOpen) {
+            closePreview();
+            setTodoOpen(false);
+          } else {
+            setTodoOpen(true);
+          }
+        }}
       />
       <MessageStream
         running={running}
@@ -540,6 +571,7 @@ export function App(): JSX.Element {
       />
       <StatusChips statuses={statuses} />
       {showBash ? <BashPanel conn={conn} onClose={() => setShowBash(false)} /> : null}
+      {showGit ? <GitView onClose={() => setShowGit(false)} /> : null}
       {sidebarOpen ? (
         <Sidebar
           conn={conn}
@@ -547,15 +579,29 @@ export function App(): JSX.Element {
           piCwd={piCwd}
           onSwitched={() => {
             // The bash panel's output belongs to the session being left; it
-            // cannot be rebuilt from get_state/get_messages.
+            // cannot be rebuilt from get_state/get_messages. The Git drawer
+            // follows the attached cwd, so it would show another repo.
             setShowBash(false);
+            setShowGit(false);
             void rehydrate();
           }}
           onToast={pushToast}
         />
       ) : null}
-      {todoOpen ? (
-        <RightPanel todo={todo} theme={theme} onClose={() => setTodoOpen(false)} />
+      {panelOpen ? (
+        <RightPanel
+          todo={todo}
+          preview={preview}
+          theme={theme}
+          onBack={() => {
+            closePreview();
+            setTodoOpen(true);
+          }}
+          onClose={() => {
+            closePreview();
+            setTodoOpen(false);
+          }}
+        />
       ) : null}
       {dialog ? <ExtensionDialog key={dialog.id} dialog={dialog} onRespond={respondUi} /> : null}
       <div class="toast-stack">
@@ -588,6 +634,8 @@ function Topbar(props: {
   onSetThinking: (level: string) => void;
   onCompact: () => void;
   onToggleBash: () => void;
+  onToggleGit: () => void;
+  gitOpen: boolean;
   onToggleTheme: () => void;
   theme: Theme;
   sidebarOpen: boolean;
@@ -633,6 +681,13 @@ function Topbar(props: {
       </button>
       <button class="topbar-btn" onClick={props.onToggleBash}>
         Bash
+      </button>
+      <button
+        class={`topbar-btn${props.gitOpen ? " active" : ""}`}
+        title={props.gitOpen ? "关闭 Git 视图（Esc）" : "打开 Git 视图"}
+        onClick={props.onToggleGit}
+      >
+        <IconGit size={14} /> Git
       </button>
       <button
         class="topbar-btn"
