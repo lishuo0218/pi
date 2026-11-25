@@ -59,6 +59,8 @@ export class GitStore {
   history: GitHistoryState = { kind: "idle" };
   commits: GitCommit[] = [];
   hasMore = false;
+  /** True while a follow-up history page is in flight; the list tail shows it. */
+  loadingMore = false;
   /** A write is in flight: every write control is disabled meanwhile. */
   busy = false;
   /** A commit-message draft is in flight; the draft button shows it. */
@@ -389,12 +391,18 @@ export class GitStore {
 
   /** Load the first page of history, or one more page after it. */
   async loadHistory(more: boolean): Promise<void> {
+    // The list tail asks for the next page whenever it becomes visible, which
+    // would otherwise stack identical requests.
+    if (more && this.loadingMore) return;
     const seq = ++this.historySeq;
-    if (!more) {
+    if (more) {
+      this.loadingMore = true;
+    } else {
       this.history = { kind: "loading" };
-      this.emit();
     }
+    this.emit();
     const res = await callGit({ action: "log", limit: HISTORY_PAGE, skip: more ? this.commits.length : 0 });
+    this.loadingMore = false;
     if (seq !== this.historySeq) return;
     if (!res.ok) {
       this.history = { kind: "error", error: res.error };

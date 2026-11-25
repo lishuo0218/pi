@@ -8,6 +8,7 @@ import type {
   GitErrorCode,
   GitFile,
   GitOperation,
+  GitRef,
   GitRequest,
   GitResult,
   GitStatus,
@@ -100,12 +101,25 @@ function parseCommits(value: unknown): GitCommit[] | null {
   const commits: GitCommit[] = [];
   for (const entry of value) {
     if (!isRecord(entry)) continue;
-    const { sha, short, author, date, subject } = entry;
+    const { sha, short, author, date, subject, refs } = entry;
     if (typeof sha !== "string" || typeof short !== "string" || typeof author !== "string") continue;
     if (typeof date !== "string" || typeof subject !== "string") continue;
-    commits.push({ sha, short, author, date, subject });
+    commits.push({ sha, short, author, date, subject, refs: parseRefs(refs) });
   }
   return commits;
+}
+
+function parseRefs(value: unknown): GitRef[] {
+  if (!Array.isArray(value)) return [];
+  const refs: GitRef[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const { kind, name } = entry;
+    if (typeof name !== "string" || name === "") continue;
+    if (kind !== "branch" && kind !== "remote" && kind !== "tag") continue;
+    refs.push({ kind, name });
+  }
+  return refs;
 }
 
 function parseErrorCode(value: unknown): GitErrorCode {

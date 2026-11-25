@@ -208,9 +208,7 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {  co
             <GitChanges store={store} status={store.status.status} />
           </aside>
 
-          <aside class="gv-history">
-            <GitHistory store={store} />
-          </aside>
+          <GitHistory store={store} />
 
           <div class="gv-main">
             {selection === null ? (

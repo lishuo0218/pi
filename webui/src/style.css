@@ -3032,6 +3032,7 @@ body {
   width: 280px;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   background: var(--c-bg-subtle);
   border-right: 1px solid var(--c-border);
 }
@@ -3289,18 +3290,19 @@ body {
   white-space: nowrap;
 }
 
-/* 历史：sha + 标题两行，作者与时间放 title；选中态与文件行一致 */
+/* 历史栏：每行固定 34px，上行短 sha（等宽），下行单行标题 + refs 徽标；
+   作者与时间仍放 title，选中态与文件行一致（2px 竖条 + 8% 底色） */
 .gv-log {
   display: flex;
   flex-direction: column;
-  padding-bottom: var(--sp-1);
 }
 .gv-commit {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 1px;
-  line-height: 1.4;
-  padding: 5px var(--sp-2) 5px 9px;
+  height: 34px;
+  padding: 3px var(--sp-2) 3px 9px;
   border-left: 2px solid transparent;
   cursor: pointer;
   outline: none;
@@ -3315,35 +3317,74 @@ body {
   background: color-mix(in srgb, var(--c-fg) 8%, transparent);
   border-left-color: var(--c-fg);
 }
+/* sha 是这一栏最能认的锚点：等宽 + 轻微字距，比标题弱一档但不再淡到看不清 */
 .gv-commit-sha {
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--c-fg-tertiary);
+  font-size: 10.5px;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+  color: var(--c-fg-secondary);
+}
+.gv-commit.active .gv-commit-sha {
+  color: var(--c-fg);
+}
+.gv-commit-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
 }
 .gv-commit-subject {
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
+  line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.gv-more {
-  display: block;
-  width: 100%;
-  height: 26px;
-  border: 0;
-  background: none;
-  color: var(--c-fg-secondary);
-  font: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
+.gv-commit-refs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 52%;
+  overflow: hidden;
 }
-.gv-more:hover:not(:disabled) {
+/* 徽标：无边框小胶囊，只靠底色与字色分层；本地分支最深、远程跟踪最淡、标签用警示色 */
+.gv-ref {
+  max-width: 92px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
   background: var(--c-bg-inset);
+  color: var(--c-fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gv-ref.branch {
   color: var(--c-fg);
 }
-.gv-more:disabled {
+.gv-ref.remote {
   color: var(--c-fg-tertiary);
-  cursor: default;
+}
+.gv-ref.tag {
+  color: var(--c-warning);
+}
+.gv-ref.more {
+  color: var(--c-fg-tertiary);
+}
+/* 分页尾巴：没有按钮，滚到这里就加载下一页，这里只留一句进行中的提示 */
+.gv-log-tail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  font-size: 10.5px;
+  color: var(--c-fg-tertiary);
 }
 
 /* 空态与初始化失败 */

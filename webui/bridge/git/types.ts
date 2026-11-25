@@ -70,7 +70,12 @@ export type GitCommit = {
   author: string;
   date: string;
   subject: string;
+  /** Branches, remote-tracking refs and tags that point at this commit. */
+  refs: GitRef[];
 };
+
+/** A ref decoration: what kind it is decides its badge in the history column. */
+export type GitRef = { kind: "branch" | "remote" | "tag"; name: string };
 
 export type GitStats = { files: number; add: number; del: number };
 

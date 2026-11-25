@@ -86,7 +86,7 @@ pi 目前的交互界面只有终端 TUI。`pi --mode rpc` 提供了完整的 JS
 | F-26 | Bash 面板 | 独立于对话的命令面板，走 `bash`/`abort_bash` 命令，输出实时滚动 |
 | F-27 | 压缩与重试控制 | `compact` 按钮、`set_auto_compaction`、`set_auto_retry`/`abort_retry`；压缩/重试事件期间状态栏明确提示 |
 | F-28 | 队列模式设置 | `set_steering_mode`/`set_follow_up_mode` |
-| F-29 | Git 全屏视图 | 顶栏入口 + 全屏视图（Esc 退出，与 Bash 面板互斥）：分支/上游/ahead-behind、暂存/未暂存/未跟踪三组改动与逐文件 diff（文件级与 hunk 级 stage/unstage/discard）、提交（含 amend）、历史、`fetch --prune` / `pull --ff-only` / `push`（无上游或游离 HEAD 时置灰并给出 `git push -u` 命令，推送先确认）；全部经 `POST /api/git`（argv 直调 git，不带 shell，路径/SHA 在 bridge 侧校验），改动通知走 `GET /api/git/events`（SSE） |
+| F-29 | Git 全屏视图 | 顶栏入口 + 全屏视图（Esc 退出，与 Bash 面板互斥）：分支/上游/ahead-behind、暂存/未暂存/未跟踪三组改动与逐文件 diff（文件级与 hunk 级 stage/unstage/discard）、提交（含 amend）、历史（分页 + 分支/远程/标签徽标，滚到底自动加载）、`fetch --prune` / `pull --ff-only` / `push`（无上游或游离 HEAD 时置灰并给出 `git push -u` 命令，推送先确认）；全部经 `POST /api/git`（argv 直调 git，不带 shell，路径/SHA 在 bridge 侧校验），改动通知走 `GET /api/git/events`（SSE） |
 | F-30 | AI 提交说明 | 提交框右上角「AI 生成」：把已暂存 diff（没有暂存时用全部改动，每文件截断 200 行）交给 `pi --mode text` 一次性生成 Conventional Commits 说明，30 秒超时；输入框已有文字时先确认再覆盖，失败只进顶部提示条 |
 | F-31 | Git 分支与高级操作（未实现） | 分支列表/切换/新建、stash、merge/rebase/cherry-pick/revert/reset、tag、进行中操作提示与逐行冲突解决面板 |
 
