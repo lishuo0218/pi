@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- Fixed tool calls failing with `Invalid arguments for tool ...: Expected ',' or ']' after array element in JSON` when the model leaves a quote unescaped inside a string value, such as a quoted word in Chinese text. Such quotes are now kept as string content, and a quote that ends a key, a value or an array element still closes the string
 - Fixed `xhigh` thinking failing with `Unsupported Google thinking level mapping ... xhigh -> xhigh` before any request on Gemini 4 Hydrogen and Neon in the `google-generative-ai` and `google-vertex` APIs. It is now sent as `thinkingLevel: "XHIGH"`; models that use token budgets use the `high` budget for it ([#12184](https://github.com/earendil-works/pi/issues/12184))
 - Fixed `google-vertex` Gemini 2.5 Flash-Lite getting the Gemini 2.5 Flash thinking budgets (`minimal` sent 128 tokens instead of 512); both Google APIs now share one budget table
 - Fixed Google responses that end with the finish reasons `MISSING_THOUGHT_SIGNATURE`, `MALFORMED_RESPONSE`, `ESCALATION`, `PUP_LIMITED_DISABLED`, or `MODEL_ARMOR` failing with `Unhandled stop reason`; they now end as errors

@@ -19,7 +19,9 @@
  *
  * Differences from `parseStreamingJson()` on incomplete text: trailing whitespace inside an unterminated string is
  * kept (it was trimmed), a string that contains a raw control character or an invalid escape stays visible while it
- * streams (it was dropped until the document was complete), and `NaN` and `Infinity` words are dropped.
+ * streams (it was dropped until the document was complete), and `NaN` and `Infinity` words are dropped. A quote
+ * inside a string that no delimiter follows ends the string here, while `repairJson()` keeps it as content: the
+ * preview of such a call loses that text, and the parse of the finished call restores it.
  *
  * `append()` also returns the changes the piece made, for a writer that keeps its own copy of the value and applies
  * them instead of re-assigning snapshots: `set` when a key, an array item or a finished value appears (a new string is

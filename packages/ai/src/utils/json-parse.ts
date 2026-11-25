@@ -3,6 +3,21 @@ import type { ToolCall } from "../types.ts";
 
 const VALID_JSON_ESCAPES = new Set(['"', "\\", "/", "b", "f", "n", "r", "t"]);
 
+/** The four characters JSON allows as whitespace outside strings. */
+function isWhitespace(char: string): boolean {
+	return char === " " || char === "\t" || char === "\n" || char === "\r";
+}
+
+/**
+ * Whether the quote at `index` ends a string: JSON allows only `,`, `:` (after a key), `}` or `]` after one.
+ */
+function endsString(json: string, index: number): boolean {
+	let next = index + 1;
+	while (next < json.length && isWhitespace(json[next] ?? "")) next++;
+	const char = json[next];
+	return char === undefined || char === "," || char === ":" || char === "}" || char === "]";
+}
+
 function isControlCharacter(char: string): boolean {
 	const codePoint = char.codePointAt(0);
 	return codePoint !== undefined && codePoint >= 0x00 && codePoint <= 0x1f;
@@ -29,6 +44,8 @@ function escapeControlCharacter(char: string): string {
  * Repairs malformed JSON string literals by:
  * - escaping raw control characters inside strings
  * - doubling backslashes before invalid escape characters
+ * - escaping quotes inside strings that are not followed by a delimiter, i.e. quotes the model forgot to escape
+ *   (common for quoted words in Chinese text: `"菜单里含"创建新会话""`)
  */
 export function repairJson(json: string): string {
 	let repaired = "";
@@ -46,8 +63,13 @@ export function repairJson(json: string): string {
 		}
 
 		if (char === '"') {
-			repaired += char;
-			inString = false;
+			// A quote that no delimiter follows is content, not the end of the string: escaping it keeps the text.
+			if (endsString(json, index)) {
+				repaired += char;
+				inString = false;
+			} else {
+				repaired += '\\"';
+			}
 			continue;
 		}
 

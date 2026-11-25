@@ -29,6 +29,26 @@ describe("parseToolCallArguments", () => {
 		});
 	});
 
+	// A model that quotes a word inside Chinese text tends to send the quotes unescaped.
+	it("escapes quotes inside a string that no delimiter follows", () => {
+		expect(parseToolCallArguments(`{"question":"用"安全"模式吗？","options":["是","否：含"其他""]}`)).toEqual({
+			arguments: { question: '用"安全"模式吗？', options: ["是", '否：含"其他"'] },
+		});
+	});
+
+	it("keeps quotes that end a key, a value or an array element", () => {
+		expect(parseToolCallArguments('{"a":"b","c":["d"],"e":"say \\"hi\\""}')).toEqual({
+			arguments: { a: "b", c: ["d"], e: 'say "hi"' },
+		});
+	});
+
+	it("still reports JSON that escaping cannot repair", () => {
+		const raw = '{"a":"x" "b":"y"}';
+		const result = parseToolCallArguments(raw);
+		expect(result.arguments).toEqual({});
+		expect(result.argumentsError?.endsWith(raw)).toBe(true);
+	});
+
 	it("uses empty arguments for empty text", () => {
 		expect(parseToolCallArguments("")).toEqual({ arguments: {} });
 	});
