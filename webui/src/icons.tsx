@@ -225,13 +225,31 @@ export function IconCheck({ size = 13 }: IconProps): JSX.Element {
   );
 }
 
-/** Session search field: a magnifier.**/
+/** Session search field: a magnifier. */
 export function IconSearch({ size = 13 }: IconProps): JSX.Element {
   return (
     <Svg size={size}>
       <circle cx="11" cy="11" r="7" />
       <path d="M20 20l-3.6-3.6" />
     </Svg>
+  );
+}
+
+/** Composer send: an upward arrow. */
+export function IconArrowUp({ size = 16 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <path d="M12 19V5M6 11l6-6 6 6" />
+    </Svg>
+  );
+}
+
+/** Composer stop: a filled square inside the circular stop button. */
+export function IconStop({ size = 12 }: IconProps): JSX.Element {
+  return (
+    <svg class="ui-icon" viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true" focusable="false">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
   );
 }
 

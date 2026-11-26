@@ -43,6 +43,9 @@
   /* 阴影 */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 2px 12px rgba(0, 0, 0, 0.08);
+  /* 输入框悬浮阴影：比卡片阴影更宽更淡，聚焦时加深 */
+  --shadow-float: 0 10px 30px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-float-strong: 0 12px 34px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
   /* 语法高亮 token 色（亮色：GitHub Light 系） */
   --hl-comment: #6e7781;
   --hl-keyword: #cf222e;
@@ -99,6 +102,8 @@
   --c-bubble-bg: #1d1d1c;
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 2px 12px rgba(0, 0, 0, 0.5);
+  --shadow-float: 0 10px 30px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-float-strong: 0 12px 34px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.4);
   /* 语法高亮 token 色（暗色：One Dark 系） */
   --hl-comment: #7f848e;
   --hl-keyword: #c678dd;
@@ -233,17 +238,19 @@ body {
   gap: 6px;
   max-width: 260px;
   font: inherit;
-  font-size: 13px;
-  color: var(--c-fg);
-  background: var(--c-bg);
-  border: 1px solid var(--c-border);
+  font-size: 12px;
+  color: var(--c-fg-secondary);
+  background: none;
+  border: none;
   border-radius: 8px;
-  padding: 4px 8px;
+  padding: 5px 8px;
   cursor: pointer;
+  transition: background 0.12s, color 0.12s;
 }
 .mp-btn.open,
 .mp-btn:hover {
-  border-color: var(--c-border-strong);
+  color: var(--c-fg);
+  background: color-mix(in srgb, var(--c-fg) 8%, transparent);
 }
 .mp-name {
   overflow: hidden;
@@ -254,10 +261,10 @@ body {
   flex: none;
   padding: 0 6px;
   border-radius: var(--r-pill);
-  background: var(--c-bg-inset);
+  background: color-mix(in srgb, var(--c-fg) 8%, transparent);
   color: var(--c-fg-secondary);
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 10px;
+  line-height: 15px;
 }
 .mp-panel {
   position: absolute;
@@ -267,8 +274,8 @@ body {
   width: 268px;
   padding: 6px;
   background: var(--c-bg);
-  border: 1px solid var(--c-border-strong);
-  border-radius: var(--r-md);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
   box-shadow: var(--shadow-md);
 }
 .mp-label {
@@ -585,24 +592,30 @@ body {
   pointer-events: none;
 }
 
+/* Floating card: soft fill with a wide shadow; focus lights it up to the page
+   background and adds a faint ring instead of a hard border. */
 .composer {
   max-width: var(--content-max);
   margin: 0 auto;
-  background: var(--c-bg);
-  border: 1px solid var(--c-border);
-  border-radius: 16px;
-  padding: var(--sp-3) var(--sp-4);
+  background: var(--c-bg-subtle);
+  border: 1px solid transparent;
+  border-radius: 20px;
+  padding: 14px 16px 10px;
   pointer-events: auto;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-float);
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 .composer.focus {
-  border-color: var(--c-border-strong);
-  box-shadow: var(--shadow-md);
+  background: var(--c-bg);
+  border-color: color-mix(in srgb, var(--c-fg) 12%, transparent);
+  box-shadow:
+    var(--shadow-float-strong),
+    0 0 0 3px color-mix(in srgb, var(--c-fg) 4%, transparent);
 }
 /* 文件树路径拖到输入框上方时的放置提示 */
 .composer.drop-active {
   border-color: var(--c-fg-tertiary);
-  background: var(--c-bg-subtle);
+  background: var(--c-bg);
 }
 
 /* 富文本草稿区：正文里可嵌路径徽章，空内容显示占位提示 */
@@ -651,11 +664,63 @@ body {
 .composer .toolbar {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  margin-top: var(--sp-2);
+  gap: 6px;
+  margin-top: 6px;
 }
 .composer .spacer {
   flex: 1;
+}
+/* Shortcut reminder: idle and unfocused only (hidden, not removed, so the
+   model picker and send button keep their place when the editor focuses). */
+.composer-hint {
+  flex: none;
+  padding-right: 2px;
+  font-size: 11px;
+  color: var(--c-fg-tertiary);
+  white-space: nowrap;
+  transition: opacity 0.12s;
+}
+.composer-hint.faded {
+  opacity: 0;
+}
+/* Round primary actions: arrow to send, square to stop. */
+.composer-send,
+.composer-stop {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.12s, opacity 0.12s;
+}
+.composer-send {
+  background: var(--c-inverse-bg);
+  color: var(--c-inverse-fg);
+}
+.composer-send:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.composer-send:disabled {
+  background: color-mix(in srgb, var(--c-fg) 10%, transparent);
+  color: var(--c-fg-tertiary);
+  cursor: default;
+}
+.composer-stop {
+  background: color-mix(in srgb, var(--c-error) 14%, transparent);
+  color: var(--c-error);
+}
+.composer-stop:hover {
+  background: color-mix(in srgb, var(--c-error) 24%, transparent);
+}
+@media (max-width: 720px) {
+  .composer-hint {
+    display: none;
+  }
 }
 
 .btn-send {
@@ -1447,9 +1512,9 @@ body {
   position: relative;
   width: 56px;
   height: 56px;
-  border-radius: var(--r-sm);
+  border-radius: 10px;
   overflow: hidden;
-  border: 1px solid var(--c-border);
+  background: var(--c-bg-inset);
 }
 .attach-thumb img {
   width: 100%;
@@ -1472,15 +1537,23 @@ body {
 }
 
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   background: none;
   border: none;
+  border-radius: 50%;
   font-size: 16px;
   cursor: pointer;
-  padding: 2px 6px;
   color: var(--c-fg-secondary);
+  transition: background 0.12s, color 0.12s;
 }
 .icon-btn:hover {
   color: var(--c-fg);
+  background: color-mix(in srgb, var(--c-fg) 8%, transparent);
 }
 
 /* === M3: 顶栏按钮 / 上下文占比 === */
@@ -2194,9 +2267,9 @@ body {
   max-width: 720px;
   margin: 0 auto;
   background: var(--c-bg);
-  border: 1px solid var(--c-border-strong);
-  border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
   overflow: hidden;
   pointer-events: auto;
 }

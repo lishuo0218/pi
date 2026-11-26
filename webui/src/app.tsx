@@ -20,7 +20,7 @@ import { getPreviewWidth, onPreviewWidthChange } from "./panel-width";
 import { getSidebarWidth, onSidebarWidthChange } from "./sidebar-width";
 import { closePreview, getPreviewRequest, onPreviewChange } from "./preview-target";
 import { Logo } from "./logo";
-import { IconGit, IconImage, IconMenu, IconMoon, IconSun, IconColumns } from "./icons";
+import { IconArrowUp, IconGit, IconImage, IconMenu, IconMoon, IconStop, IconSun, IconColumns } from "./icons";
 import { GitView } from "./git/git-view";
 import { sessionFiles } from "./session-files";
 import { droppedMessages } from "./session-history";
@@ -1284,7 +1284,7 @@ function Composer(props: {
           ref={editorRef}
           class={`draft${draft === "" ? " empty" : ""}`}
           contentEditable={!props.readOnly}
-          data-placeholder={props.readOnly ? "本页只读" : "输入内容，Enter 发送，/ 唤起命令，Shift+Enter 换行"}
+          data-placeholder={props.readOnly ? "本页只读" : "输入消息…"}
           onFocus={() => setFocus(true)}
           onBlur={() => setFocus(false)}
           onInput={syncDraft}
@@ -1314,7 +1314,7 @@ function Composer(props: {
             </div>
           ) : null}
           <button class="icon-btn" title="附加图片" onClick={() => fileRef.current?.click()}>
-            <IconImage size={18} />
+            <IconImage size={17} />
           </button>
           <input
             ref={fileRef}
@@ -1329,6 +1329,7 @@ function Composer(props: {
             }}
           />
           <div class="spacer" />
+          <span class={`composer-hint${focus ? " faded" : ""}`}>Enter 发送 · / 命令</span>
           <ModelPicker
             model={props.model}
             models={props.models}
@@ -1338,16 +1339,18 @@ function Composer(props: {
             onSetThinking={props.onSetThinking}
           />
           {props.running ? (
-            <button class="btn-stop" onClick={() => props.onStop()}>
-              停止
+            <button class="composer-stop" title="停止当前回合" aria-label="停止" onClick={() => props.onStop()}>
+              <IconStop size={11} />
             </button>
           ) : (
             <button
-              class="btn-send"
+              class="composer-send"
+              title="发送（Enter）"
+              aria-label="发送"
               onClick={submit}
               disabled={!draft.trim() && attachments.length === 0}
             >
-              发送
+              <IconArrowUp size={15} />
             </button>
           )}
         </div>
