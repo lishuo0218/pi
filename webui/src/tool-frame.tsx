@@ -5,6 +5,7 @@
 // user decides otherwise.
 import { useState } from "preact/hooks";
 import type { JSX } from "preact";
+import { Collapse } from "./collapse";
 
 /** Cards the user opened or closed stay that way across remounts (session only). */
 const openChoice = new Map<string, boolean>();
@@ -60,7 +61,9 @@ export function ToolFrame({
           <span class="tool-duration">{(durationMs / 1000).toFixed(1)}s</span>
         ) : null}
       </div>
-      {open ? <div class="frame-body">{children}</div> : null}
+      <Collapse open={open}>
+        <div class="frame-body">{children}</div>
+      </Collapse>
     </div>
   );
 }

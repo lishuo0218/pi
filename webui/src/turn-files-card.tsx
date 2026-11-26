@@ -4,8 +4,10 @@
 import { useState } from "preact/hooks";
 import type { JSX } from "preact";
 import type { SessionTurn } from "./session-files";
+import { IconChevron } from "./icons";
 import { PathLabel, relativeToCwd, splitPath } from "./path-label";
 import { FileIcon } from "./file-icon";
+import { Collapse } from "./collapse";
 import type { Theme } from "./theme";
 
 /** "+N −M" badges; a zero count on either side is left out. */
@@ -37,11 +39,13 @@ export function TurnFilesCard({
         title={open ? "收起本轮的改动" : "展开本轮的改动"}
         onClick={() => setOpen(!open)}
       >
-        <span class="caret">▾</span>
+        <span class="caret">
+          <IconChevron />
+        </span>
         <span class="turn-files-count">改动 {turn.files.length} 个文件</span>
         <LineStats added={turn.added} removed={turn.removed} />
       </button>
-      {open ? (
+      <Collapse open={open}>
         <ul class="turn-files-body">
           {turn.files.map((file) => {
             const shown = relativeToCwd(file.path, cwd) ?? file.path;
@@ -55,7 +59,7 @@ export function TurnFilesCard({
             );
           })}
         </ul>
-      ) : null}
+      </Collapse>
     </div>
   );
 }

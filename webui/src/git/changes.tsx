@@ -4,7 +4,8 @@
 import type { JSX } from "preact";
 import { useState } from "preact/hooks";
 import type { GitFile, GitLineStats, GitSide, GitStatus } from "../../bridge/git/types";
-import { IconCheck, IconDiscard, IconStage, IconTrash, IconUnstage } from "../icons";
+import { IconCheck, IconChevron, IconDiscard, IconStage, IconTrash, IconUnstage } from "../icons";
+import { Collapse } from "../collapse";
 import { pathParts } from "./path-parts";
 import type { GitStore } from "./store";
 
@@ -106,17 +107,17 @@ export function GitChanges({ store, status }: { store: GitStore; status: GitStat
             collapsed={collapsed.has(section.key)}
             onToggle={() => toggle(section.key)}
           />
-          {collapsed.has(section.key)
-            ? null
-            : section.files.map((file) => (
-                <FileRow
-                  key={`${section.key}:${file.path}`}
-                  store={store}
-                  section={section}
-                  file={file}
-                  active={isOpen(store, section, file)}
-                />
-              ))}
+          <Collapse open={!collapsed.has(section.key)}>
+            {section.files.map((file) => (
+              <FileRow
+                key={`${section.key}:${file.path}`}
+                store={store}
+                section={section}
+                file={file}
+                active={isOpen(store, section, file)}
+              />
+            ))}
+          </Collapse>
         </section>
       ))}
     </div>
@@ -154,7 +155,9 @@ function GroupHead({
   return (
     <div class="gv-group-head">
       <button class="gv-group-toggle" onClick={onToggle} title={collapsed ? "展开" : "折叠"}>
-        <span class={`gv-caret${collapsed ? "" : " open"}`}>▸</span>
+        <span class={`caret gv-caret${collapsed ? "" : " open"}`}>
+          <IconChevron />
+        </span>
         <span class="gv-group-title">{section.title}</span>
         <span class="gv-badge">{section.files.length}</span>
       </button>

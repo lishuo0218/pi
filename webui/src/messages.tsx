@@ -16,6 +16,7 @@ import type {
   UserMessage,
 } from "./protocol";
 import { IconThinking } from "./icons";
+import { Collapse } from "./collapse";
 import { renderMarkdown } from "./markdown";
 import { ToolCard, toolSummary } from "./tool-card";
 import { BashCard, bashRunFromMessage } from "./bash-card";
@@ -77,88 +78,108 @@ export function ThinkingBlock({
         <IconThinking />
         {live ? "思考中…" : "已思考"}
       </div>
-      <div class="body md-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: renderMarkdown(content.thinking) }} />
+      <Collapse open={open}>
+        <div class="body md-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: renderMarkdown(content.thinking) }} />
+      </Collapse>
     </div>
   );
 }
 
-function AssistantBlock({
+/**
+ * One content block of an assistant message, drawn as it always is: a folding
+ * thinking block, a tool card (or a call-only stub), or answer markdown. Null
+ * for blocks that draw nothing.
+ */
+export function AssistantContentBlock({
   message,
+  index,
   toolStore,
-  atTurnEnd,
 }: {
   message: AssistantMessage;
+  index: number;
   toolStore: ToolStore;
-  /** Last assistant message of its turn: shows the time and token footer. */
-  atTurnEnd: boolean;
-}): JSX.Element {
+}): JSX.Element | null {
   useSyncExternalStore(
     (cb) => toolStore.subscribe(cb),
     () => toolStore.version,
   );
+  const block = message.content[index];
+  if (!block) return null;
   const streaming = message.stopReason === "pending";
-  const hasText = message.content.some(
-    (c) => c.type === "text" && (c as TextContent).text,
-  );
+  if (block.type === "thinking") {
+    return (
+      <ThinkingBlock
+        content={block as ThinkingContent}
+        live={streaming && index === message.content.length - 1}
+      />
+    );
+  }
+  if (block.type === "toolCall") {
+    const call = block as ToolCallContent;
+    // read only feeds the model: its card would just repeat file content in
+    // the transcript, so it is not rendered.
+    if (call.name === "read") return null;
+    const exec = toolStore.executions.get(call.id);
+    if (exec) return <ToolCard exec={exec} />;
+    // Still streaming (or the run has not reached tool_execution_start yet):
+    // build the card from the call itself, so the target file shows from the
+    // first argument delta and the edit preview starts as soon as the arguments
+    // are complete, not when the tool ends.
+    if (streaming) {
+      return (
+        <ToolCard
+          exec={{
+            toolCallId: call.id,
+            toolName: call.name,
+            args: call.arguments,
+            turn: toolStore.turn,
+            state: "running",
+            partial: "",
+            resultText: "",
+            resultImages: [],
+            isError: false,
+          }}
+        />
+      );
+    }
+    // No execution seen (call only): print what the call was about. The bridge
+    // replays running tools, so this is a call whose run ended without a result
+    // (aborted) or one get_messages kept without its toolResult; a bare tool
+    // name would lose the command/path.
+    const summary = toolSummary(call.arguments);
+    return (
+      <div class="tool-card done">
+        <div class="tool-head">
+          <span class="tool-name">{call.name}</span>
+          {summary ? <span class="tool-summary">{summary}</span> : null}
+        </div>
+      </div>
+    );
+  }
+  const text = (block as TextContent).text;
+  if (!text) return null;
+  return <div class="md-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
+}
+
+/**
+ * End of a message: the running line while it has no text yet, the error line,
+ * and the time / token footer when the turn is over. Rendered inside the
+ * message's last drawn piece, or under the group that folded it away.
+ */
+export function AssistantTail({
+  message,
+  atTurnEnd,
+}: {
+  message: AssistantMessage;
+  /** Last assistant message of its turn. */
+  atTurnEnd: boolean;
+}): JSX.Element {
+  const streaming = message.stopReason === "pending";
+  const hasText = message.content.some((c) => c.type === "text" && (c as TextContent).text);
+  const footer = !streaming && atTurnEnd ? turnMeta(message) : "";
   return (
-    <div class="msg-assistant narrow">
-      {message.content.map((c, i) => {
-        if (c.type === "thinking")
-          return (
-            <ThinkingBlock
-              key={i}
-              content={c as ThinkingContent}
-              live={streaming && i === message.content.length - 1}
-            />
-          );
-        if (c.type === "toolCall") {
-          const call = c as ToolCallContent;
-          // read only feeds the model: its card would just repeat file content
-          // in the transcript, so it is not rendered.
-          if (call.name === "read") return null;
-          const exec = toolStore.executions.get(call.id);
-          if (exec) return <ToolCard key={i} exec={exec} />;
-          // Still streaming (or the run has not reached tool_execution_start
-          // yet): build the card from the call itself, so the target file shows
-          // from the first argument delta and the edit preview starts as soon
-          // as the arguments are complete, not when the tool ends.
-          if (streaming) {
-            return (
-              <ToolCard
-                key={i}
-                exec={{
-                  toolCallId: call.id,
-                  toolName: call.name,
-                  args: call.arguments,
-                  turn: toolStore.turn,
-                  state: "running",
-                  partial: "",
-                  resultText: "",
-                  resultImages: [],
-                  isError: false,
-                }}
-              />
-            );
-          }
-          // No execution seen (call only): print what the call was about. The
-          // bridge replays running tools, so this is a call whose run ended
-          // without a result (aborted) or one get_messages kept without its
-          // toolResult; a bare tool name would lose the command/path.
-          const summary = toolSummary(call.arguments);
-          return (
-            <div key={i} class="tool-card done">
-              <div class="tool-head">
-                <span class="tool-name">{call.name}</span>
-                {summary ? <span class="tool-summary">{summary}</span> : null}
-              </div>
-            </div>
-          );
-        }
-        const text = (c as TextContent).text;
-        if (!text) return null;
-        return <div key={i} class="md-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
-      })}
-      {!hasText && streaming ? (
+    <>
+      {streaming && !hasText ? (
         <div class="running-line">
           <span class="spinner" />
           运行中…
@@ -167,9 +188,31 @@ function AssistantBlock({
       {message.stopReason === "error" && message.errorMessage ? (
         <div class="error-line">{message.errorMessage}</div>
       ) : null}
-      {!streaming && atTurnEnd ? (
-        <div class="turn-meta">{turnMeta(message)}</div>
-      ) : null}
+      {footer ? <div class="turn-meta">{footer}</div> : null}
+    </>
+  );
+}
+
+function AssistantBlock({
+  message,
+  toolStore,
+  atTurnEnd,
+  hidden,
+}: {
+  message: AssistantMessage;
+  toolStore: ToolStore;
+  /** Last assistant message of its turn: shows the time and token footer. */
+  atTurnEnd: boolean;
+  /** Content indices a folding group took over; they are not drawn here. */
+  hidden: number[];
+}): JSX.Element {
+  const skip = hidden.length === 0 ? null : new Set(hidden);
+  return (
+    <div class="msg-assistant narrow">
+      {message.content.map((_, i) => (skip?.has(i) ? null : (
+        <AssistantContentBlock key={i} message={message} index={i} toolStore={toolStore} />
+      )))}
+      <AssistantTail message={message} atTurnEnd={atTurnEnd} />
     </div>
   );
 }
@@ -221,6 +264,7 @@ export function MessageView({
   onFork,
   forkOccurrence,
   atTurnEnd,
+  hidden,
 }: {
   message: AgentMessage;
   toolStore: ToolStore;
@@ -229,6 +273,8 @@ export function MessageView({
   forkOccurrence?: number;
   /** Set by MessagesArea: last assistant row before the next user message. */
   atTurnEnd?: boolean;
+  /** Assistant content indices a folding group took over (see activity-groups). */
+  hidden?: number[];
 }): JSX.Element | null {
   switch (message.role) {
     case "user": {
@@ -261,6 +307,7 @@ export function MessageView({
           message={message as AssistantMessage}
           toolStore={toolStore}
           atTurnEnd={atTurnEnd ?? false}
+          hidden={hidden ?? []}
         />
       );
     case "toolResult":
@@ -290,8 +337,6 @@ export function MessageView({
         </div>
       );
     }
-    case "custom":
-      return null;
     default:
       return null;
   }

@@ -1,18 +1,23 @@
 // Bash card: the single display for every bash run in the UI (tool calls,
 // bashExecution transcript rows, bash-panel history). Collapsed it is one bar
-// (caret, status, terminal icon, one-line command, exit badge, duration);
-// expanded it is a terminal (full command, output tail, copy buttons, pi's
-// truncation note). Colour stays grey except the prompt / exit badge, which
-// carry the terminal's success / error semantic.
+// (status, terminal icon, one-line command, failure badge, duration, copy
+// buttons on hover) over the last few lines of output; expanded it is a
+// terminal (prompt line, output tail, pi's truncation note). Colour stays grey
+// except the prompt and the failure badge, which carry the shell's semantics.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { JSX } from "preact";
 import { IconTerminal } from "./icons";
 import { CopyButton } from "./copy-button";
+import { Collapse } from "./collapse";
+import { fadeSwap } from "./fade-swap";
 import type { BashExecutionMessage } from "./protocol";
 import type { ToolExecution } from "./tool-store";
 
 /** Lines kept in the expanded terminal before older output folds away. */
 const TAIL_LINES = 500;
+
+/** Lines kept under a collapsed card; pi's TUI keeps five. */
+const PREVIEW_LINES = 5;
 
 /** pi's truncation counts for the model-facing output (details.truncation). */
 export type BashTruncation = { outputLines: number; totalLines: number };
@@ -67,7 +72,8 @@ export function bashRunFromExec(exec: ToolExecution): BashRun {
     running,
     durationMs: exec.durationMs,
     exitCode: running ? undefined : (split.exitCode ?? (exec.isError ? undefined : 0)),
-    status: split.status ?? (exec.isError && !running ? "执行失败" : undefined),
+    // A status line only when pi gave none: an exit code is a better badge than a word.
+    status: split.status ?? (exec.isError && !running && split.exitCode === undefined ? "执行失败" : undefined),
     truncation: exec.truncation,
     fullOutputPath: exec.fullOutputPath,
   };
@@ -88,6 +94,18 @@ export function bashRunFromMessage(message: BashExecutionMessage): BashRun {
 /** Collapse whitespace so a multi-line command fits the one-line bar. */
 function oneLine(command: string): string {
   return command.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Last `limit` lines of a text block, with the count of lines left out and the
+ * block's total. The trailing newline's empty segment is not a line.
+ */
+function lastLines(text: string, limit: number): { text: string; hidden: number; lines: number } {
+  const lines = text.split("\n");
+  const visible = lines.length - (text.endsWith("\n") ? 1 : 0);
+  const hidden = Math.max(0, visible - limit);
+  if (hidden === 0) return { text, hidden: 0, lines: visible };
+  return { text: lines.slice(hidden).join("\n"), hidden, lines: visible };
 }
 
 export function BashCard({
@@ -112,52 +130,47 @@ export function BashCard({
     if (el && run.running && open) el.scrollTop = el.scrollHeight;
   }, [run.output, run.running, open]);
 
-  const output = useMemo(() => {
-    if (showAll) return { text: run.output, hidden: 0, lines: countLines(run.output) };
-    const lines = run.output.split("\n");
-    const visible = lines.length - (run.output.endsWith("\n") ? 1 : 0);
-    const hidden = Math.max(0, visible - TAIL_LINES);
-    if (hidden === 0) return { text: run.output, hidden: 0, lines: visible };
-    // Keep the trailing newline: it belongs to the line before the last empty split segment.
-    return { text: lines.slice(hidden).join("\n"), hidden, lines: visible };
-  }, [run.output, showAll]);
+  const output = useMemo(() => lastLines(run.output, showAll ? Infinity : TAIL_LINES), [run.output, showAll]);
+  const preview = useMemo(() => lastLines(run.output, PREVIEW_LINES), [run.output]);
 
   return (
-    <div class={`bash-card${failed ? " error" : ""}`}>
+    <div class={`bash-card${open ? " open" : ""}${run.running ? " running" : ""}${failed ? " error" : ""}`}>
       <div class="bash-bar" onClick={() => setManual(!open)}>
         {run.running ? <span class="spinner" /> : null}
         <IconTerminal size={13} />
         <span class="bash-line" title={commandLine}>
           {commandLine || "bash"}
         </span>
-        {run.running ? null : run.status !== undefined ? (
-          <span class="bash-exit err">{run.status}</span>
-        ) : run.exitCode !== undefined ? (
-          <span class={`bash-exit ${run.exitCode === 0 ? "ok" : "err"}`}>exit {run.exitCode}</span>
-        ) : null}
-        {run.durationMs != null && !run.running ? (
-          <span class="tool-duration">{(run.durationMs / 1000).toFixed(1)}s</span>
-        ) : null}
+        <span class="bash-end">
+          {failed ? <span class="bash-exit">{run.status ?? `exit ${run.exitCode}`}</span> : null}
+          {run.durationMs != null && !run.running ? (
+            <span class="tool-duration">{(run.durationMs / 1000).toFixed(1)}s</span>
+          ) : null}
+        </span>
+        {/* Hover only: the bar keeps its width for the command. */}
+        <span class="bash-actions" onClick={(e) => e.stopPropagation()}>
+          {run.command ? <CopyButton text={run.command} label="命令" /> : null}
+          {run.output ? <CopyButton text={run.output} label="输出" /> : null}
+        </span>
       </div>
-      {open ? (
-        <div class="bash-body">
-          <div class="bash-command-row">
-            <span class="bash-prompt">❯</span>
-            <pre class="bash-command">{run.command}</pre>
-            {run.command ? <CopyButton text={run.command} label="复制命令" /> : null}
-          </div>
-          <div class="bash-terminal" ref={terminalRef}>
-            {output.hidden > 0 ? (
-              <button class="bash-earlier" onClick={() => setShowAll(true)}>
-                …展开早期输出（{output.hidden} 行）
-              </button>
-            ) : null}
-            {output.text ? (
-              <pre class="bash-output">{output.text}</pre>
-            ) : (
-              <div class="bash-empty">{run.running ? "等待输出…" : "（无输出）"}</div>
-            )}
-          </div>
+      <Collapse open={open}>
+        <div class="bash-terminal" ref={terminalRef}>
+          {run.command ? (
+            <div class="bash-cmd">
+              <span class="bash-prompt">❯</span>
+              <pre class="bash-command">{run.command}</pre>
+            </div>
+          ) : null}
+          {output.hidden > 0 ? (
+            <button class="bash-more" onClick={() => fadeSwap(terminalRef.current, () => setShowAll(true))}>
+              ⋯ 前 {output.hidden} 行
+            </button>
+          ) : null}
+          {output.text ? (
+            <pre class="bash-output">{output.text}</pre>
+          ) : (
+            <div class="bash-empty">{run.running ? "等待输出…" : "（无输出）"}</div>
+          )}
           {run.truncation || run.truncated ? (
             <div class="bash-note">
               {run.truncation
@@ -166,19 +179,14 @@ export function BashCard({
               {run.fullOutputPath ? ` · 完整输出：${run.fullOutputPath}` : ""}
             </div>
           ) : null}
-          <div class="bash-foot">
-            {run.output ? <CopyButton text={run.output} label="复制输出" /> : null}
-            <span class="bash-meta">{output.lines} 行</span>
-          </div>
         </div>
-      ) : null}
+      </Collapse>
+      <Collapse open={!open && preview.lines > 0}>
+        <div class="bash-preview" onClick={() => setManual(true)}>
+          <pre class="bash-output">{preview.text}</pre>
+          {preview.hidden > 0 ? <div class="bash-more-line">⋯ 前 {preview.hidden} 行</div> : null}
+        </div>
+      </Collapse>
     </div>
   );
-}
-
-/** Line count of a text block, ignoring the trailing newline's empty segment. */
-function countLines(text: string): number {
-  if (text === "") return 0;
-  const lines = text.split("\n").length;
-  return text.endsWith("\n") ? lines - 1 : lines;
 }

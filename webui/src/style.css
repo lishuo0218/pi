@@ -290,11 +290,37 @@ body {
   border-radius: 4px;
 }
 
-/* thinking 折叠块 */
-.thinking {
-  border-left: 2px solid var(--c-border);
-  padding: var(--sp-1) 0 var(--sp-1) var(--sp-3);
+/* 思考 + 命令的折叠组：一行摘要，展开后原位显示原有的思考块和工具卡片。
+   .narrow 让它与消息正文同宽居中（见 activity-group.tsx）。 */
+.activity-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  cursor: pointer;
+  user-select: none;
   font-size: 13px;
+  color: var(--c-fg-secondary);
+}
+.activity.live .activity-head {
+  color: var(--c-fg);
+}
+.activity.open .activity-head .caret {
+  transform: rotate(90deg);
+}
+.activity-body {
+  margin-top: var(--sp-2);
+}
+/* 组内的块自带下边距，最后一块的间距由组承担，避免双重留白。 */
+.activity-body > *:last-child {
+  margin-bottom: 0;
+}
+
+/* thinking 折叠块：pi TUI 的语言——斜体、比答案暗一档、没有边框。
+   折叠态就是一行可点的灰字（整行热区），展开是斜体 markdown，40vh 内滚动。 */
+.thinking {
+  padding: var(--sp-1) 0;
+  font-size: 13px;
+  font-style: italic;
   color: var(--c-fg-secondary);
   margin-bottom: var(--sp-3);
 }
@@ -302,8 +328,16 @@ body {
   display: flex;
   align-items: center;
   gap: var(--sp-1);
+  /* 整行可点；负向内缩让折叠行的文字与展开后的正文左边对齐。 */
+  margin-inline: -6px;
+  padding-inline: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   user-select: none;
+}
+.thinking .summary:hover {
+  background: var(--c-bg-subtle);
+  color: var(--c-fg);
 }
 .thinking.live .summary {
   color: var(--c-fg);
@@ -333,14 +367,49 @@ body {
 .thinking .md-body pre code {
   font-size: 12px;
 }
-.thinking:not(.open) .body {
-  display: none;
+/* 斜体的是思考文字，不是代码。 */
+.thinking .md-body code,
+.thinking .md-body pre {
+  font-style: normal;
 }
+/* 展开/收起：正文始终在 DOM 里，靠 grid 行高 0fr ↔ 1fr 动画，不测量内容高度。
+   时长与 src/collapse.tsx 里的 EXPAND_MS / COLLAPSE_MS 一致，改一处要改两处。 */
+.collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 150ms ease-out,
+    opacity 150ms ease-out;
+}
+.collapse.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 200ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+.collapse > .collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+/* 展开/收起指示器：同一个 chevron（见 icons.tsx），展开时旋转 90° 指向下。
+   具体位置各自决定何时算展开（侧栏 .collapsed、回合卡 .open、git / 折叠组 .open）。 */
 .caret {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
   transition: transform 0.15s;
-  font-size: 10px;
-  margin-right: var(--sp-1);
+  /* 24 整数格的 chevron 在 12px 下左右各有约 3px 空盒（路径从 x=9 起），
+     这里把空盒收回去，靠文字的那一边才跟原来的字符间距接近。 */
+  margin-inline: -3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapse,
+  .collapse.open,
+  .caret {
+    transition: none;
+  }
 }
 
 /* 运行中行 */
@@ -752,85 +821,7 @@ body {
   border-radius: var(--r-sm);
 }
 
-/* === Bash 卡片（工具调用 / 历史 bashExecution / Bash 面板共用） ===
-   折叠态一行：展开箭头、状态、终端图标、单行命令、退出码、耗时。
-   展开态终端：完整命令 + 输出尾部 500 行 + 复制 + 截断提示。
-   除提示符与退出码用功能色外一律灰阶。 */
-.bash-card {
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-md);
-  margin: var(--sp-2) 0;
-  overflow: hidden;
-  background: var(--c-bg);
-}
-.bash-card.error {
-  border-color: color-mix(in srgb, var(--c-error) 45%, var(--c-border));
-}
-/* 失败的信号是图标染色，条上不再有 ✓/✕。 */
-.bash-card.error .bash-bar > .ui-icon {
-  color: var(--c-error);
-}
-.bash-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-  padding: 6px var(--sp-3);
-  font-size: 13px;
-  cursor: pointer;
-  user-select: none;
-}
-.bash-bar:hover {
-  background: var(--c-bg-subtle);
-}
-.bash-line {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-.bash-exit {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-.bash-exit.ok {
-  color: var(--c-success);
-}
-.bash-exit.err {
-  color: var(--c-error);
-}
-.bash-body {
-  border-top: 1px solid var(--c-border);
-}
-.bash-command-row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--c-bg-subtle);
-}
-.bash-prompt {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--c-success);
-  user-select: none;
-}
-.bash-command {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+/* === 复制按钮（工具卡共用）：图标 + 文案，点后短暂显示「已复制」 === */
 .copy-btn {
   flex: none;
   display: inline-flex;
@@ -850,14 +841,143 @@ body {
   color: var(--c-fg);
   border-color: var(--c-fg-tertiary);
 }
+
+/* === Bash 卡片（工具调用 / 历史 bashExecution / Bash 面板共用） ===
+   壳体与其他卡一致：38px 折叠条、运行/失败 3px 左边条、正文上限 340px。
+   折叠态是条 + 最后 5 行输出；展开态是一个终端（❯ 命令行 + 输出尾部 500 行）。
+   复制按钮只在悬停条时浮出，不占命令行宽度。
+   除提示符与失败徽标用功能色外一律灰阶。 */
+.bash-card {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  margin: var(--sp-2) 0;
+  overflow: hidden;
+  background: var(--c-bg);
+}
+.bash-card.running {
+  border-left: 3px solid var(--c-running);
+}
+.bash-card.error {
+  border-left: 3px solid var(--c-error);
+}
+/* 失败的信号是图标染色，条上不再有 ✓/✕。 */
+.bash-card.error .bash-bar > .ui-icon {
+  color: var(--c-error);
+}
+.bash-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.bash-bar:hover {
+  background: var(--c-bg-subtle);
+}
+.bash-card.open .bash-bar {
+  border-bottom: 1px solid var(--c-border);
+}
+.bash-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  /* 12px mono is shorter than the 13px label of the other cards' bars; this
+     keeps this bar at their 38px without a min-height. */
+  line-height: 22px;
+}
+/* 只显示失败：成功的 exit 0 是噪音。悬停时让位给复制按钮。 */
+.bash-end {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity 0.12s;
+}
+.bash-bar:hover .bash-end {
+  opacity: 0;
+}
+.bash-exit {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-error);
+}
+.bash-actions {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  background: var(--c-bg-subtle);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.bash-bar:hover .bash-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
 .bash-terminal {
-  max-height: 320px;
+  max-height: 340px;
   overflow: auto;
   background: var(--c-bg-inset);
 }
+.bash-cmd {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px dashed var(--c-border);
+}
+.bash-prompt {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--c-success);
+  user-select: none;
+}
+.bash-command {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 「⋯ 前 N 行」：终端内被折叠的早期输出与折叠态预览共用一种读法。 */
+.bash-more {
+  display: block;
+  width: 100%;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  border-top: 1px dashed var(--c-border);
+  border-bottom: 1px dashed var(--c-border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-fg-tertiary);
+  cursor: pointer;
+}
+.bash-more:hover {
+  color: var(--c-fg);
+}
 .bash-output {
   margin: 0;
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--sp-1) var(--sp-3) var(--sp-2);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.55;
@@ -870,39 +990,26 @@ body {
   font-size: 12px;
   color: var(--c-fg-tertiary);
 }
-.bash-earlier {
-  display: block;
-  width: 100%;
-  padding: 3px 0;
-  background: none;
-  border: none;
-  border-bottom: 1px dashed var(--c-border);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--c-fg-tertiary);
-  cursor: pointer;
-}
-.bash-earlier:hover {
-  color: var(--c-fg);
-}
 .bash-note {
   padding: 4px var(--sp-3);
-  border-top: 1px solid var(--c-border);
+  border-top: 1px dashed var(--c-border);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.6;
   color: var(--c-warning);
-  word-break: break-all;
+  word-break: break-word;
 }
-.bash-foot {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: 4px var(--sp-3) 6px;
+.bash-preview {
   border-top: 1px solid var(--c-border);
+  background: var(--c-bg-inset);
+  cursor: pointer;
 }
-.bash-foot .bash-meta {
-  margin-left: auto;
+.bash-preview .bash-output {
+  padding: var(--sp-2) var(--sp-3) 0;
+  color: var(--c-fg-secondary);
+}
+.bash-more-line {
+  padding: 0 var(--sp-3) var(--sp-2);
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--c-fg-tertiary);
@@ -1584,13 +1691,10 @@ body {
   cursor: pointer;
 }
 .group-card-head .caret {
-  font-size: 9px;
-  flex: none;
   color: var(--c-fg-tertiary);
-  transition: transform 0.15s;
 }
-.group-card-head.collapsed .caret {
-  transform: rotate(-90deg);
+.group-card-head:not(.collapsed) .caret {
+  transform: rotate(90deg);
 }
 .group-card-head.current .group-card-cwd {
   color: var(--c-fg);
@@ -2678,13 +2782,10 @@ body {
   background: var(--c-bg-inset);
 }
 .turn-files-head .caret {
-  flex: none;
-  font-size: 11px;
   color: var(--c-fg-tertiary);
-  transition: transform 0.15s ease;
 }
-.turn-files-card:not(.open) .turn-files-head .caret {
-  transform: rotate(-90deg);
+.turn-files-card.open .turn-files-head .caret {
+  transform: rotate(90deg);
 }
 .turn-files-count {
   font-size: 12.5px;
@@ -3092,13 +3193,6 @@ body {
 }
 
 /* 分组（冲突 / 已暂存 / 更改）与文件行 */
-.gv-caret {
-  flex: none;
-  width: 8px;
-  font-size: 8px;
-  line-height: 1;
-  transition: transform 0.12s;
-}
 .gv-caret.open {
   transform: rotate(90deg);
 }

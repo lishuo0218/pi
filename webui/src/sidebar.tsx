@@ -9,7 +9,8 @@ import type { JSX } from "preact";
 import type { Command, RpcConnection } from "./rpc-connection";
 import type { SessionStore } from "./session-store";
 import type { ResponseRecord } from "./protocol";
-import { IconGear, IconStar } from "./icons";
+import { IconChevron, IconGear, IconStar } from "./icons";
+import { Collapse } from "./collapse";
 
 export type SessionSummary = {
   path: string;
@@ -646,7 +647,9 @@ export function Sidebar({
                       title={g.cwd ?? g.name}
                       onClick={() => toggleGroup(g.name)}
                     >
-                      <span class="caret">▾</span>
+                      <span class="caret">
+                        <IconChevron />
+                      </span>
                       <span class="group-card-cwd">{labels.get(g.name) ?? groupLabel(g)}</span>
                       <span class="group-count">{g.sessions.length}</span>
                     </button>
@@ -659,7 +662,9 @@ export function Sidebar({
                       +
                     </button>
                   </div>
-                  {!isCollapsed ? <div class="group-card-body">{g.sessions.map(sessionRow)}</div> : null}
+                  <Collapse open={!isCollapsed}>
+                    <div class="group-card-body">{g.sessions.map(sessionRow)}</div>
+                  </Collapse>
                 </div>
               );
             })}

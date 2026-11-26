@@ -225,6 +225,18 @@ export function IconCheck({ size = 13 }: IconProps): JSX.Element {
   );
 }
 
+/**
+ * Disclosure chevron, drawn pointing right. Callers rotate it 90° to point down
+ * while the section is open (`.caret` in style.css), so the glyph never changes.
+ */
+export function IconChevron({ size = 12 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <path d="M9 5l7 7-7 7" />
+    </Svg>
+  );
+}
+
 /** Thinking block summary: two-lobed brain glyph (filled, 1024 viewBox from the source asset). */
 export function IconThinking({ size = 14 }: IconProps): JSX.Element {
   return (

@@ -15,6 +15,7 @@ import { diffWords, formatLineDiff, type WordSeg } from "./diff-engine";
 import { langForPath, lineHtml } from "./highlight";
 import { PathLabel, relativeToCwd, splitPath, toolPathArg } from "./path-label";
 import { IconColumns, IconEdit, IconEye } from "./icons";
+import { Collapse } from "./collapse";
 import { openPreview } from "./preview-target";
 
 type Row =
@@ -416,13 +417,13 @@ export function EditCard({ exec }: { exec: ToolExecution }): JSX.Element {
         ) : null}
       </div>
       {isError && exec.resultText ? <div class="edit-error">{exec.resultText}</div> : null}
-      {open && diff !== undefined ? (
-        layout === "split" ? (
+      <Collapse open={open && diff !== undefined}>
+        {diff === undefined ? null : layout === "split" ? (
           <SplitView groups={groups} lang={meta.lang} wordSegs={wordSegs} scrollRef={(el) => (diffRef.current = el)} />
         ) : (
           <UnifiedView groups={groups} lang={meta.lang} wordSegs={wordSegs} scrollRef={(el) => (diffRef.current = el)} />
-        )
-      ) : null}
+        )}
+      </Collapse>
     </div>
   );
 }

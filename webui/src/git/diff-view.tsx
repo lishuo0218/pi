@@ -6,6 +6,7 @@ import type { JSX } from "preact";
 import { langForPath, markedLineHtml, type LineRun } from "../highlight";
 import { useVirtualLines } from "../virtual-lines";
 import { buildDisplay, displayIndexOf, findHits, type DiffRow, type DisplayRow } from "./diff-parse";
+import { fadeSwap } from "../fade-swap";
 
 /** Row height in CSS pixels; must match .gv-line in style.css. */
 const LINE_HEIGHT = 18;
@@ -27,6 +28,8 @@ export function GitDiffView({ rows, path, hunkActions }: {
   const [findOpen, setFindOpen] = useState(false);
   const [current, setCurrent] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Fade target for fold toggles: the row list, whose box keeps its height.
+  const rowsRef = useRef<HTMLDivElement | null>(null);
 
   // A new patch (other file, other side, refreshed context) starts folded.
   useEffect(() => {
@@ -116,10 +119,12 @@ export function GitDiffView({ rows, path, hunkActions }: {
             class="gv-fold-btn"
             title="展开未改动的行"
             onClick={() => {
-              setExpanded((prev) => {
-                const next = new Set(prev === "all" ? [] : prev);
-                next.add(entry.id);
-                return next;
+              fadeSwap(rowsRef.current, () => {
+                setExpanded((prev) => {
+                  const next = new Set(prev === "all" ? [] : prev);
+                  next.add(entry.id);
+                  return next;
+                });
               });
             }}
           >
@@ -191,7 +196,11 @@ export function GitDiffView({ rows, path, hunkActions }: {
         <button
           class={`viewer-btn${foldsOpen ? " active" : ""}`}
           title={foldsOpen ? "折叠未改动区域" : "展开未改动区域"}
-          onClick={() => setExpanded((prev) => (prev === "all" || prev.size > 0 ? new Set<number>() : "all"))}
+          onClick={() =>
+            fadeSwap(rowsRef.current, () =>
+              setExpanded((prev) => (prev === "all" || prev.size > 0 ? new Set<number>() : "all")),
+            )
+          }
         >
           {foldsOpen ? "折叠未改动" : "展开未改动"}
         </button>
@@ -244,7 +253,10 @@ export function GitDiffView({ rows, path, hunkActions }: {
       <div class="viewer-scroll gv-scroll" ref={virtual.scrollRef}>
         <div
           class="gv-lines"
-          ref={virtual.linesRef}
+          ref={(el) => {
+            virtual.linesRef(el);
+            rowsRef.current = el;
+          }}
           style={{ height: `${virtual.totalHeight}px`, paddingTop: `${virtual.offset}px` }}
         >
           {rowsOut}

@@ -24,6 +24,8 @@ import { GitView } from "./git/git-view";
 import { sessionFiles } from "./session-files";
 import { droppedMessages } from "./session-history";
 import { duplicateBashRows, renderedRows } from "./stream-rows";
+import { groupActivities } from "./activity-groups";
+import { ActivityGroup } from "./activity-group";
 import { TurnFilesCard } from "./turn-files-card";
 import { getPiCwd } from "./pi-cwd";
 import { setPiCwd as reportPiCwd } from "./pi-cwd";
@@ -901,34 +903,36 @@ function MessageStream({
   // duplicateBashRows); a panel-run bash has no execution and stays visible.
   const hiddenBashRows = duplicateBashRows(visible, [...tools.executions.values()]);
   const rows = hiddenBashRows.size === 0 ? visible : visible.filter((row) => !hiddenBashRows.has(row.id));
-  const hiddenCount = Math.max(0, rows.length - visibleCount);
-  const visibleRows = rows.slice(-visibleCount);
-  // The last assistant row of each turn (just before the next user message, or
+  // Rows are not what the stream draws: a run of thinking + bash collapses into
+  // one summarised unit, and its member rows disappear (see activity-groups).
+  const units = groupActivities(rows, running);
+  const hiddenCount = Math.max(0, units.length - visibleCount);
+  const visibleUnits = units.slice(-visibleCount);
+  // The last assistant unit of each turn (just before the next user message, or
   // the end of the stream) carries the time / token footer. A turn's assistant
   // rows are interleaved with toolResult rows, so only a user row closes it.
-  const turnEndRows = new Set<string>();
-  let lastAssistantRow: string | null = null;
-  for (const row of rows) {
-    if (row.kind !== "message") continue;
-    if (row.message.role === "user") {
-      if (lastAssistantRow) turnEndRows.add(lastAssistantRow);
-      lastAssistantRow = null;
-    } else if (row.message.role === "assistant") {
-      lastAssistantRow = row.id;
+  const turnEndUnits = new Set<string>();
+  let lastAssistantUnit: string | null = null;
+  for (const unit of units) {
+    const role = unit.kind === "row" ? unit.row.message.role : "assistant";
+    if (role === "user") {
+      if (lastAssistantUnit) turnEndUnits.add(lastAssistantUnit);
+      lastAssistantUnit = null;
+    } else if (role === "assistant") {
+      lastAssistantUnit = unit.id;
     }
   }
-  if (lastAssistantRow) turnEndRows.add(lastAssistantRow);
+  if (lastAssistantUnit) turnEndUnits.add(lastAssistantUnit);
   // For each user row, which occurrence of its (possibly repeated) text it is;
   // lets fork target the exact message instead of the last textual match.
   const forkOccurrence = new Map<string, number>();
   const textCount = new Map<string, number>();
-  for (const row of rows) {
-    if (row.kind === "message" && row.message.role === "user") {
-      const text = textOf((row.message as UserMessage).content);
-      const n = textCount.get(text) ?? 0;
-      textCount.set(text, n + 1);
-      forkOccurrence.set(row.id, n);
-    }
+  for (const unit of units) {
+    if (unit.kind !== "row" || unit.row.kind !== "message" || unit.row.message.role !== "user") continue;
+    const text = textOf((unit.row.message as UserMessage).content);
+    const n = textCount.get(text) ?? 0;
+    textCount.set(text, n + 1);
+    forkOccurrence.set(unit.id, n);
   }
 
   const { turns: fileTurns } = sessionFiles(tools);
@@ -936,20 +940,22 @@ function MessageStream({
   // therefore lands at the bottom of the stream, right above the composer. A
   // turn ends where the next row is a user message, or at the end of the rows.
   const fileTurnByIndex = new Map(fileTurns.map((turn) => [turn.index, turn]));
-  const cardAfterRow = new Map<string, (typeof fileTurns)[number]>();
+  const cardAfterUnit = new Map<string, (typeof fileTurns)[number]>();
   let turnIndex = 0;
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!;
-    if (row.kind === "message" && row.message.role === "user") turnIndex += 1;
-    const next = rows[i + 1];
-    const endsTurn = next === undefined || (next.kind === "message" && next.message.role === "user");
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i]!;
+    const isUser = unit.kind === "row" && unit.row.message.role === "user";
+    if (isUser) turnIndex += 1;
+    const next = units[i + 1];
+    const nextIsUser = next !== undefined && next.kind === "row" && next.row.message.role === "user";
+    const endsTurn = next === undefined || nextIsUser;
     if (!endsTurn) continue;
     const turn = fileTurnByIndex.get(turnIndex);
-    if (turn !== undefined) cardAfterRow.set(row.id, turn);
+    if (turn !== undefined) cardAfterUnit.set(unit.id, turn);
   }
   // Turns the user rows cannot place (calls made before any user message) go to
   // the top of the stream instead of being dropped.
-  const placed = new Set([...cardAfterRow.values()].map((turn) => turn.index));
+  const placed = new Set([...cardAfterUnit.values()].map((turn) => turn.index));
   const orphanTurns = fileTurns.filter((turn) => !placed.has(turn.index));
   const cwd = getPiCwd();
 
@@ -1032,16 +1038,25 @@ function MessageStream({
             <div class="es-hint">输入内容开始对话，/ 唤起命令</div>
           </div>
         ) : (
-          visibleRows.map((row) => {
-            const turn = cardAfterRow.get(row.id);
+          visibleUnits.map((unit) => {
+            const turn = cardAfterUnit.get(unit.id);
             return (
-              <Fragment key={row.id}>
-                <RowView
-                  row={row}
-                  onFork={onFork}
-                  forkOccurrence={forkOccurrence.get(row.id) ?? 0}
-                  atTurnEnd={turnEndRows.has(row.id)}
-                />
+              <Fragment key={unit.id}>
+                {unit.kind === "group" ? (
+                  <ActivityGroup
+                    unit={unit}
+                    toolStore={tools}
+                    atTurnEnd={turnEndUnits.has(unit.id)}
+                  />
+                ) : (
+                  <RowView
+                    row={unit.row}
+                    hidden={unit.hidden}
+                    onFork={onFork}
+                    forkOccurrence={forkOccurrence.get(unit.id) ?? 0}
+                    atTurnEnd={turnEndUnits.has(unit.id)}
+                  />
+                )}
                 {turn === undefined ? null : (
                   <div class="narrow">
                     <TurnFilesCard turn={turn} cwd={cwd} theme={theme} />
@@ -1063,11 +1078,14 @@ function MessageStream({
 
 function RowView({
   row,
+  hidden,
   onFork,
   forkOccurrence,
   atTurnEnd,
 }: {
   row: StreamRow;
+  /** Content a folding group above took over; not drawn here. */
+  hidden: number[];
   onFork: (text: string, occurrence: number) => void;
   forkOccurrence: number;
   atTurnEnd: boolean;
@@ -1076,6 +1094,7 @@ function RowView({
     <MessageView
       message={row.message}
       toolStore={tools}
+      hidden={hidden}
       onFork={onFork}
       forkOccurrence={forkOccurrence}
       atTurnEnd={atTurnEnd}
