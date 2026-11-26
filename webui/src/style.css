@@ -16,6 +16,7 @@
   --c-error: #c9412e;
   --c-success: #3d7a3d;
   --c-warning: #b37d1e;
+  --c-info: #4a76b8;
   --c-running: #1a1a19;
   /* 历史泳道图：8 条泳道循环取色（亮色：中饱和，落在 --c-bg-subtle 上可读） */
   --c-lane-1: #4a76b8;
@@ -84,6 +85,7 @@
   --c-error: #e8654f;
   --c-success: #6fae6f;
   --c-warning: #d1a04a;
+  --c-info: #79a6e0;
   --c-running: #e8e8e6;
   /* 历史泳道图：暗色下同色相提亮，避免在 --c-bg-subtle 上发黑 */
   --c-lane-1: #79a6e0;
@@ -221,7 +223,15 @@ body {
   white-space: nowrap;
 }
 
-.topbar select {
+/* 模型 + 思考强度：输入框工具栏上的一个按钮，面板向上弹出两段（模型 / 档位） */
+.mp {
+  position: relative;
+}
+.mp-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
   font: inherit;
   font-size: 13px;
   color: var(--c-fg);
@@ -229,10 +239,97 @@ body {
   border: 1px solid var(--c-border);
   border-radius: 8px;
   padding: 4px 8px;
-  max-width: 220px;
+  cursor: pointer;
 }
-.topbar select:focus {
-  outline: none;
+.mp-btn.open,
+.mp-btn:hover {
+  border-color: var(--c-border-strong);
+}
+.mp-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--c-bg-inset);
+  color: var(--c-fg-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+.mp-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 100;
+  width: 268px;
+  padding: 6px;
+  background: var(--c-bg);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+}
+.mp-label {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--c-fg-tertiary);
+}
+.mp-models {
+  max-height: min(46vh, 320px);
+  overflow-y: auto;
+}
+.mp-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--c-fg);
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mp-item:hover {
+  background: var(--c-bg-subtle);
+}
+.mp-item.active {
+  color: var(--c-fg);
+  font-weight: 600;
+}
+.mp-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 8px 6px;
+}
+.mp-level {
+  font: inherit;
+  font-size: 12px;
+  color: var(--c-fg-secondary);
+  background: var(--c-bg-subtle);
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.mp-level:hover {
+  color: var(--c-fg);
+}
+.mp-level.active {
+  color: var(--c-fg);
+  background: var(--c-bg-inset);
   border-color: var(--c-border-strong);
 }
 
@@ -502,21 +599,53 @@ body {
   border-color: var(--c-border-strong);
   box-shadow: var(--shadow-md);
 }
+/* 文件树路径拖到输入框上方时的放置提示 */
+.composer.drop-active {
+  border-color: var(--c-fg-tertiary);
+  background: var(--c-bg-subtle);
+}
 
-.composer textarea {
-  width: 100%;
-  border: none;
+/* 富文本草稿区：正文里可嵌路径徽章，空内容显示占位提示 */
+.draft {
+  min-height: calc(15px * 1.7);
+  overflow-y: auto;
   outline: none;
-  resize: none;
-  font: inherit;
   font-size: 15px;
   line-height: 1.7;
   color: var(--c-fg);
-  background: transparent;
-  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-.composer textarea::placeholder {
+.draft.empty::before {
+  content: attr(data-placeholder);
   color: var(--c-fg-tertiary);
+  pointer-events: none;
+}
+/* 从文件树拖进来的路径：图标 + 文件名，发送时序列化成反引号路径 */
+/* A path chip: the draft's dropped file and the same span in a sent message. */
+.path-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 1px;
+  padding: 0 7px 0 5px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-pill);
+  background: var(--c-bg-subtle);
+  font-size: 13px;
+  line-height: 1.7;
+  user-select: none;
+}
+.path-chip .file-icon,
+.path-chip .file-icon svg {
+  width: 12px;
+  height: 12px;
+}
+/* On the tinted bubble the chip needs its own fill, and it stays selectable so a
+   copied range keeps it; installChipCopy turns it back into the code span. */
+.msg-user .path-chip {
+  background: var(--c-bg-inset);
+  user-select: text;
 }
 
 .composer .toolbar {
@@ -2897,6 +3026,54 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 文件行的 git 追踪标记：行尾字母徽章，暂存（绿）在前、工作区（黄）在后；
+   文件夹只给一个汇总点，表示里面还有未提交的改动 */
+.tree-badges {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.tree-badge {
+  min-width: 14px;
+  padding: 0 3px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 3px;
+}
+.tree-badge.staged,
+.tree-badge.untracked {
+  color: var(--c-success);
+  background: color-mix(in srgb, var(--c-success) 14%, transparent);
+}
+.tree-badge.worktree {
+  color: var(--c-warning);
+  background: color-mix(in srgb, var(--c-warning) 16%, transparent);
+}
+.tree-badge.conflict {
+  color: var(--c-error);
+  background: color-mix(in srgb, var(--c-error) 14%, transparent);
+}
+.tree-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+/* 汇总点按目录里最严重的改动取色：冲突红 > 未暂存黄 > 仅暂存绿 > 仅未跟踪蓝 */
+.tree-dot.conflict {
+  background: var(--c-error);
+}
+.tree-dot.worktree {
+  background: var(--c-warning);
+}
+.tree-dot.staged {
+  background: var(--c-success);
+}
+.tree-dot.untracked {
+  background: var(--c-info);
 }
 .tree-note {
   padding: 3px 8px;

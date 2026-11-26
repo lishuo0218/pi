@@ -32,8 +32,12 @@ export function fileIconName(path: string, theme: Theme): string {
   return DEFAULT_ICON;
 }
 
+/** SVG body of a path's icon, for callers that build DOM outside Preact. */
+export function fileIconSvg(path: string, theme: Theme): string {
+  return ICON_SVG[fileIconName(path, theme)] ?? ICON_SVG[DEFAULT_ICON] ?? "";
+}
+
 export function FileIcon({ path, theme }: { path: string; theme: Theme }): JSX.Element {
   // The bundled bodies are trusted package assets, not user input.
-  const svg = ICON_SVG[fileIconName(path, theme)] ?? ICON_SVG[DEFAULT_ICON] ?? "";
-  return <span class="file-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <span class="file-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: fileIconSvg(path, theme) }} />;
 }

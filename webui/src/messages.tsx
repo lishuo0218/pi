@@ -2,6 +2,7 @@
 // row / thinking collapse / usage, inline tool cards from the tool store.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useSyncExternalStore } from "preact/compat";
+import { Fragment } from "preact";
 import type { JSX } from "preact";
 import type {
   AgentMessage,
@@ -21,6 +22,10 @@ import { renderMarkdown } from "./markdown";
 import { ToolCard, toolSummary } from "./tool-card";
 import { BashCard, bashRunFromMessage } from "./bash-card";
 import type { ToolStore } from "./tool-store";
+import { FileIcon } from "./file-icon";
+import { splitPath } from "./path-label";
+import type { Theme } from "./theme";
+import { userParts } from "./user-chips";
 
 export function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -258,9 +263,20 @@ function ToolResultBlock({
   return <ToolCard exec={exec} />;
 }
 
+/** A path chip in a sent message: the file's icon and name, the path on hover. */
+function PathChip({ path, theme }: { path: string; theme: Theme }): JSX.Element {
+  return (
+    <span class="path-chip" data-path={path} title={path}>
+      <FileIcon path={path} theme={theme} />
+      {splitPath(path).name}
+    </span>
+  );
+}
+
 export function MessageView({
   message,
   toolStore,
+  theme,
   onFork,
   forkOccurrence,
   atTurnEnd,
@@ -268,6 +284,7 @@ export function MessageView({
 }: {
   message: AgentMessage;
   toolStore: ToolStore;
+  theme: Theme;
   onFork?: (text: string, occurrence: number) => void;
   /** nth occurrence (0-based) of this user message's text, for exact fork targeting. */
   forkOccurrence?: number;
@@ -284,7 +301,13 @@ export function MessageView({
       return (
         <div class="msg-user-row">
           <div class="msg-user">
-            {text}
+            {userParts(text).map((part, i) =>
+              part.kind === "chip" ? (
+                <PathChip key={i} path={part.path} theme={theme} />
+              ) : (
+                <Fragment key={i}>{part.text}</Fragment>
+              ),
+            )}
             {imgs.map((img, i) => (
               <ImageView key={i} img={img} />
             ))}

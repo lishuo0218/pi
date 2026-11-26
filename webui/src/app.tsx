@@ -1,7 +1,8 @@
 // Root app (M3): M1/M2 features plus session panel (F-20/F-21), fork
 // (F-21), slash command autocomplete (F-22), extension UI mapping (F-23),
 // bash panel (F-24), Git drawer, compaction + context usage (F-25), retry
-// banner (F-26), full-screen Git view (F-29).
+// banner (F-26), full-screen Git view (F-29). The composer is a rich draft:
+// paths dragged out of the file tree land in it as chips.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useSyncExternalStore } from "preact/compat";
 import { Fragment, type JSX } from "preact";
@@ -28,6 +29,17 @@ import { groupActivities } from "./activity-groups";
 import { ActivityGroup } from "./activity-group";
 import { TurnFilesCard } from "./turn-files-card";
 import { getPiCwd } from "./pi-cwd";
+import { carriesPath, PATH_DRAG_TYPE } from "./path-drag";
+import {
+  chipPaths,
+  clearDraft,
+  draftText,
+  insertDraftChip,
+  insertDraftText,
+  setDraftText,
+} from "./rich-draft";
+import { rememberSentChips } from "./user-chips";
+import { ModelPicker } from "./model-picker";
 import { setPiCwd as reportPiCwd } from "./pi-cwd";
 import { initTheme, toggleTheme, watchSystemTheme, type Theme } from "./theme";
 import { DEFAULT_KEYBINDINGS, matchesKey } from "./keybindings";
@@ -565,27 +577,10 @@ export function App(): JSX.Element {
         running={running}
         compacting={compacting}
         sessionName={state.sessionName}
-        model={state.model}
-        models={models}
-        thinkingLevel={state.thinkingLevel}
-        thinkingLevels={thinkingLevels?.levels ?? null}
         sessionCost={sessionTotals
           ? `↑${fmtTokens(sessionTotals.input)} ↓${fmtTokens(sessionTotals.output)} · $${sessionTotals.cost.toFixed(4)}`
           : null}
         contextUsage={contextUsage}
-        onSetModel={async (provider, modelId) => {
-          const res = await conn.command({ type: "set_model", provider, modelId });
-          if (res.success) {
-            store.setState({ model: res.data as Model });
-          } else {
-            pushToast(res.error ?? "切换模型失败", true);
-          }
-        }}
-        onSetThinking={async (level) => {
-          const res = await conn.command({ type: "set_thinking_level", level });
-          if (res.success) store.setState({ thinkingLevel: level });
-          else pushToast(res.error ?? "切换推理档失败", true);
-        }}
         onCompact={async () => {
           const res = await conn.command({ type: "compact" });
           if (!res.success) pushToast(res.error ?? "压缩失败", true);
@@ -662,6 +657,28 @@ export function App(): JSX.Element {
         commands={commands}
         injected={injected}
         readOnly={readOnly}
+        theme={theme}
+        model={state.model}
+        models={models}
+        thinkingLevel={state.thinkingLevel}
+        thinkingLevels={thinkingLevels?.levels ?? null}
+        onSetModel={async (provider, modelId) => {
+          const res = await conn.command({ type: "set_model", provider, modelId });
+          if (res.success) {
+            store.setState({ model: res.data as Model });
+            // Levels belong to the model: a reasoning model offers more than the
+            // "off" a plain one does, so the picker's level row follows along.
+            const levelsRes = await conn.command({ type: "get_available_thinking_levels" });
+            if (levelsRes.success) setThinkingLevels(levelsRes.data as { levels: string[] });
+          } else {
+            pushToast(res.error ?? "切换模型失败", true);
+          }
+        }}
+        onSetThinking={async (level) => {
+          const res = await conn.command({ type: "set_thinking_level", level });
+          if (res.success) store.setState({ thinkingLevel: level });
+          else pushToast(res.error ?? "切换推理档失败", true);
+        }}
         onStop={async () => {
           setRunPhase("stopping");
           await conn.command({ type: "abort" });
@@ -757,14 +774,8 @@ function Topbar(props: {
   running: boolean;
   compacting: boolean;
   sessionName: string | null;
-  model: { id: string; name: string; provider: string } | null;
-  models: Model[];
-  thinkingLevel: string | null;
-  thinkingLevels: string[] | null;
   sessionCost: string | null;
   contextUsage: ContextUsage;
-  onSetModel: (provider: string, modelId: string) => void;
-  onSetThinking: (level: string) => void;
   onCompact: () => void;
   onToggleBash: () => void;
   onToggleGit: () => void;
@@ -830,43 +841,6 @@ function Topbar(props: {
       >
         {props.theme === "dark" ? <IconSun size={14} /> : <IconMoon size={14} />}
       </button>
-      <select
-        value={props.model ? `${props.model.provider}/${props.model.id}` : ""}
-        onChange={(e) => {
-          const key = (e.target as HTMLSelectElement).value;
-          const [provider = "", ...rest] = key.split("/");
-          void props.onSetModel(provider, rest.join("/"));
-        }}
-        aria-label="模型"
-      >
-        {props.model ? (
-          <option value={`${props.model.provider}/${props.model.id}`}>
-            {props.model.name ?? props.model.id}
-          </option>
-        ) : (
-          <option value="">未选择模型</option>
-        )}
-        {props.models
-          .filter((m) => !props.model || m.id !== props.model.id || m.provider !== props.model.provider)
-          .map((m) => (
-            <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-              {m.name ?? m.id}
-            </option>
-          ))}
-      </select>
-      {props.thinkingLevels && props.thinkingLevels.length > 1 ? (
-        <select
-          value={props.thinkingLevel ?? "off"}
-          onChange={(e) => void props.onSetThinking((e.target as HTMLSelectElement).value)}
-          aria-label="推理档"
-        >
-          {props.thinkingLevels.map((l) => (
-            <option key={l} value={l}>
-              {l}
-            </option>
-          ))}
-        </select>
-      ) : null}
       <span class={`conn-badge${props.connState === "open" ? "" : " off"}`}>
         {props.connState === "open" ? "已连接" : props.connState === "connecting" ? "连接中…" : "已断开，重连中"}
       </span>
@@ -1057,6 +1031,7 @@ function MessageStream({
                 ) : (
                   <RowView
                     row={unit.row}
+                    theme={theme}
                     hidden={unit.hidden}
                     onFork={onFork}
                     forkOccurrence={forkOccurrence.get(unit.id) ?? 0}
@@ -1084,12 +1059,14 @@ function MessageStream({
 
 function RowView({
   row,
+  theme,
   hidden,
   onFork,
   forkOccurrence,
   atTurnEnd,
 }: {
   row: StreamRow;
+  theme: Theme;
   /** Content a folding group above took over; not drawn here. */
   hidden: number[];
   onFork: (text: string, occurrence: number) => void;
@@ -1100,6 +1077,7 @@ function RowView({
     <MessageView
       message={row.message}
       toolStore={tools}
+      theme={theme}
       hidden={hidden}
       onFork={onFork}
       forkOccurrence={forkOccurrence}
@@ -1121,16 +1099,27 @@ function Composer(props: {
   commands: CommandInfo[];
   injected: { v: number; text: string } | null;
   readOnly: boolean;
+  theme: Theme;
+  model: { id: string; name: string; provider: string } | null;
+  models: Model[];
+  thinkingLevel: string | null;
+  thinkingLevels: string[] | null;
+  onSetModel: (provider: string, modelId: string) => void;
+  onSetThinking: (level: string) => void;
   onSendWithMode: (mode: DeliveryMode, text: string, images: { data: string; mimeType: string }[]) => void;
   onStop: () => void;
 }): JSX.Element {
-  const [text, setText] = useState("");
+  // Derived message text of the editor, refreshed on every edit: the editor itself
+  // is uncontrolled DOM because chips are not Preact nodes.
+  const [draft, setDraft] = useState("");
   const [focus, setFocus] = useState(false);
+  // A tree path is hovering the composer: the box shows it accepts the drop.
+  const [dropActive, setDropActive] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   // Delivery mode matters only while a run is in progress (F-16); queue is
   // the idle default and equals a plain prompt.
   const [mode, setMode] = useState<DeliveryMode>("queue");
-  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const lastInjected = useRef(0);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1150,30 +1139,45 @@ function Composer(props: {
     return () => observer.disconnect();
   }, []);
 
+  // Esc cancelling a drag never sends dragleave to the composer, so a highlight
+  // left over from a cancelled drag has to be cleared from dragend.
+  useEffect(() => {
+    if (!dropActive) return;
+    const clear = (): void => setDropActive(false);
+    window.addEventListener("dragend", clear);
+    return () => window.removeEventListener("dragend", clear);
+  }, [dropActive]);
+
   // set_editor_text injection (F-23).
   useEffect(() => {
     if (props.injected && props.injected.v > lastInjected.current) {
       lastInjected.current = props.injected.v;
-      setText(props.injected.text);
-      const ta = taRef.current;
-      if (ta) {
-        ta.focus();
-        requestAnimationFrame(autoGrow);
-      }
+      const editor = editorRef.current;
+      if (editor === null) return;
+      setDraftText(editor, props.injected.text);
+      syncDraft();
     }
   }, [props.injected]);
 
-  const slashQuery = text.startsWith("/") && !text.includes(" ") ? text.slice(1).toLowerCase() : null;
+  const slashQuery = draft.startsWith("/") && !draft.includes(" ") ? draft.slice(1).toLowerCase() : null;
   const slashMatches = slashQuery !== null
     ? props.commands.filter((c) => c.name.toLowerCase().includes(slashQuery)).slice(0, 8)
     : [];
 
   const autoGrow = (): void => {
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
+    const editor = editorRef.current;
+    if (editor === null) return;
+    editor.style.height = "auto";
     const line = 15 * 1.6;
-    ta.style.height = `${Math.min(Math.max(ta.scrollHeight, line), line * 8)}px`;
+    editor.style.height = `${Math.min(Math.max(editor.scrollHeight, line), line * 8)}px`;
+  };
+
+  /** Pull the editor's text into state after any edit, typed or scripted. */
+  const syncDraft = (): void => {
+    const editor = editorRef.current;
+    if (editor === null) return;
+    setDraft(draftText(editor));
+    autoGrow();
   };
 
   const addFiles = (files: FileList | File[]): void => {
@@ -1194,29 +1198,39 @@ function Composer(props: {
 
   const submit = (): void => {
     if (props.readOnly) return;
-    const trimmed = text.trim();
+    const trimmed = draft.trim();
     if (!trimmed && attachments.length === 0) return;
     const images = attachments.map((a) => ({ data: a.data, mimeType: a.mimeType }));
     const sendMode = props.running ? mode : "queue";
-    setText("");
+    const message = trimmed || "请看这些图片";
+    const editor = editorRef.current;
+    if (editor !== null) {
+      // Read the chips before clearing: the bubble marks these spans exactly.
+      rememberSentChips(message, chipPaths(editor));
+      clearDraft(editor);
+      // syncDraft puts back the placeholder, which an emptied editor needs.
+      syncDraft();
+    }
     setAttachments([]);
     requestAnimationFrame(autoGrow);
-    props.onSendWithMode(sendMode, trimmed || "请看这些图片", images);
-  };
-
-  const onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      submit();
-    }
+    props.onSendWithMode(sendMode, message, images);
   };
 
   const onPaste = (e: ClipboardEvent): void => {
+    if (props.readOnly) return;
     const files = [...(e.clipboardData?.files ?? [])];
     if (files.length > 0) {
       e.preventDefault();
       addFiles(files);
+      return;
     }
+    // Paste as text only: clipboard HTML would drop styled markup into the draft.
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    const editor = editorRef.current;
+    if (text === "" || editor === null) return;
+    e.preventDefault();
+    insertDraftText(editor, text);
+    syncDraft();
   };
 
   return (
@@ -1228,8 +1242,10 @@ function Composer(props: {
               key={c.name}
               class="slash-item"
               onClick={() => {
-                setText(`/${c.name} `);
-                taRef.current?.focus();
+                const editor = editorRef.current;
+                if (editor === null) return;
+                setDraftText(editor, `/${c.name} `);
+                syncDraft();
               }}
             >
               <span class="slash-name">/{c.name}</span>
@@ -1238,7 +1254,29 @@ function Composer(props: {
           ))}
         </div>
       ) : null}
-      <div class={`composer${focus ? " focus" : ""}`}>
+      <div
+        class={`composer${focus ? " focus" : ""}${dropActive ? " drop-active" : ""}`}
+        onDragOver={(e) => {
+          if (props.readOnly || !carriesPath(e.dataTransfer)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setDropActive(true);
+        }}
+        onDragLeave={(e) => {
+          const next = e.relatedTarget;
+          if (next instanceof Node && e.currentTarget.contains(next)) return;
+          setDropActive(false);
+        }}
+        onDrop={(e) => {
+          const path = e.dataTransfer?.getData(PATH_DRAG_TYPE) ?? "";
+          setDropActive(false);
+          const editor = editorRef.current;
+          if (props.readOnly || path === "" || editor === null) return;
+          e.preventDefault();
+          insertDraftChip(editor, path, props.theme);
+          syncDraft();
+        }}
+      >
         {attachments.length > 0 ? (
           <div class="attach-row">
             {attachments.map((a) => (
@@ -1255,19 +1293,22 @@ function Composer(props: {
             ))}
           </div>
         ) : null}
-        <textarea
-          ref={taRef}
-          rows={1}
-          disabled={props.readOnly}
-          placeholder={props.readOnly ? "本页只读" : "输入内容，Enter 发送，/ 唤起命令，Shift+Enter 换行"}
-          value={text}
+        <div
+          ref={editorRef}
+          class={`draft${draft === "" ? " empty" : ""}`}
+          contentEditable={!props.readOnly}
+          data-placeholder={props.readOnly ? "本页只读" : "输入内容，Enter 发送，/ 唤起命令，Shift+Enter 换行"}
           onFocus={() => setFocus(true)}
           onBlur={() => setFocus(false)}
-          onInput={(e) => {
-            setText((e.target as HTMLTextAreaElement).value);
-            autoGrow();
+          onInput={syncDraft}
+          onKeyDown={(e) => {
+            // Enter during IME composition confirms the candidate, it does not send.
+            if (e.isComposing) return;
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
           }}
-          onKeyDown={onKeyDown}
           onPaste={onPaste}
         />
         <div class="toolbar">
@@ -1301,6 +1342,14 @@ function Composer(props: {
             }}
           />
           <div class="spacer" />
+          <ModelPicker
+            model={props.model}
+            models={props.models}
+            thinkingLevel={props.thinkingLevel}
+            thinkingLevels={props.thinkingLevels}
+            onSetModel={props.onSetModel}
+            onSetThinking={props.onSetThinking}
+          />
           {props.running ? (
             <button class="btn-stop" onClick={() => props.onStop()}>
               停止
@@ -1309,7 +1358,7 @@ function Composer(props: {
             <button
               class="btn-send"
               onClick={submit}
-              disabled={!text.trim() && attachments.length === 0}
+              disabled={!draft.trim() && attachments.length === 0}
             >
               发送
             </button>
