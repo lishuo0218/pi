@@ -189,7 +189,7 @@ export function ToolCard({ exec }: { exec: ToolExecution }): JSX.Element {
   if (exec.toolName === "edit") return <EditCard exec={exec} />;
   if (exec.toolName === "write") return <WriteCard exec={exec} />;
   if (exec.toolName === "bash") {
-    return <BashCard run={bashRunFromExec(exec)} behavior={{ kind: "stream" }} />;
+    return <BashCard run={bashRunFromExec(exec)} />;
   }
   if (exec.toolName === "ask_user") return <AskCard exec={exec} />;
   if (exec.toolName === "todo") return <TodoCard exec={exec} />;

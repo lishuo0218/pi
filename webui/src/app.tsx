@@ -20,7 +20,6 @@ import { getPreviewWidth, onPreviewWidthChange } from "./panel-width";
 import { closePreview, getPreviewRequest, onPreviewChange } from "./preview-target";
 import { Logo } from "./logo";
 import { IconGit, IconImage, IconMenu, IconMoon, IconSun, IconColumns } from "./icons";
-import { BashPanel } from "./bash-panel";
 import { GitView } from "./git/git-view";
 import { sessionFiles } from "./session-files";
 import { droppedMessages } from "./session-history";
@@ -134,7 +133,6 @@ export function App(): JSX.Element {
   const [retry, setRetry] = useState<RetryInfo | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextUsage>(null);
   const [sessionTotals, setSessionTotals] = useState<{ input: number; output: number; cost: number } | null>(null);
-  const [showBash, setShowBash] = useState(false);
   const [showGit, setShowGit] = useState(false);
   const [todoOpen, setTodoOpen] = useState(true);
   // The panel's file preview is opened from leaf components (file tree, tool
@@ -585,15 +583,8 @@ export function App(): JSX.Element {
           const res = await conn.command({ type: "compact" });
           if (!res.success) pushToast(res.error ?? "压缩失败", true);
         }}
-        onToggleBash={() => {
-          setShowBash(!showBash);
-          setShowGit(false);
-        }}
         gitOpen={showGit}
-        onToggleGit={() => {
-          setShowGit(!showGit);
-          setShowBash(false);
-        }}
+        onToggleGit={() => setShowGit(!showGit)}
         onToggleTheme={() => setTheme(toggleTheme())}
         theme={theme}
         sidebarOpen={sidebarOpen}
@@ -716,7 +707,6 @@ export function App(): JSX.Element {
         }}
       />
       <StatusChips statuses={statuses} />
-      {showBash ? <BashPanel conn={conn} onClose={() => setShowBash(false)} /> : null}
       {showGit ? <GitView onClose={() => setShowGit(false)} /> : null}
       {sidebarOpen ? (
         <Sidebar
@@ -725,10 +715,8 @@ export function App(): JSX.Element {
           piCwd={piCwd}
           readOnly={readOnly}
           onSwitched={() => {
-            // The bash panel's output belongs to the session being left; it
-            // cannot be rebuilt from get_state/get_messages. The Git drawer
-            // follows the attached cwd, so it would show another repo.
-            setShowBash(false);
+            // The Git drawer follows the attached cwd, so after a switch it
+            // would show another repo.
             setShowGit(false);
             // Extension dialogs, status chips, widgets and the retry banner
             // belong to the session being left.
@@ -777,7 +765,6 @@ function Topbar(props: {
   sessionCost: string | null;
   contextUsage: ContextUsage;
   onCompact: () => void;
-  onToggleBash: () => void;
   onToggleGit: () => void;
   gitOpen: boolean;
   onToggleTheme: () => void;
@@ -823,9 +810,6 @@ function Topbar(props: {
       ) : null}
       <button class="topbar-btn" title="压缩上下文" onClick={props.onCompact} disabled={props.running}>
         压缩
-      </button>
-      <button class="topbar-btn" onClick={props.onToggleBash}>
-        Bash
       </button>
       <button
         class={`topbar-btn${props.gitOpen ? " active" : ""}`}

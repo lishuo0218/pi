@@ -12,13 +12,12 @@ export type ConnState = "connecting" | "open" | "closed";
 const COMMAND_TIMEOUT_MS = 30_000;
 
 /**
- * Commands that legitimately run for minutes (a bash command, a manual
- * compaction, a session switch that spawns pi). They get their own completion
- * signal (bash_execution_update / compaction_end / the attach response), so a
- * deadline would report failures for work that is still going.
+ * Commands that legitimately run for minutes (a manual compaction, a session
+ * switch that spawns pi). They get their own completion signal
+ * (compaction_end / the attach response), so a deadline would report failures
+ * for work that is still going.
  */
 const LONG_RUNNING_COMMANDS = new Set([
-  "bash",
   "compact",
   "clone",
   "fork",
@@ -149,14 +148,9 @@ export class RpcConnection {
    * Send a command; resolves with its correlated response. Never rejects: a
    * disconnected socket or a missed deadline resolves a failed response, so
    * every caller has one error path (`res.success === false`).
-   *
-   * A caller-supplied string id is kept: the `bash` command uses its id as
-   * the correlation id of `bash_execution_update` events, so overwriting it
-   * would make streamed output unmatchable (the response correlation still
-   * works with the preserved id). All other callers rely on auto ids.
    */
   command(command: Command): Promise<ResponseRecord> {
-    const id = typeof command.id === "string" && command.id ? command.id : `webui-${++this.nextId}`;
+    const id = `webui-${++this.nextId}`;
     const record = { ...command, id };
     return new Promise((resolve) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {

@@ -1,5 +1,5 @@
-// Bash card: the single display for every bash run in the UI (tool calls,
-// bashExecution transcript rows, bash-panel history). Collapsed it is one bar
+// Bash card: the single display for every bash run in the UI (tool calls and
+// bashExecution transcript rows). Collapsed it is one bar
 // (status, terminal icon, one-line command, failure badge, duration, copy
 // buttons on hover) over the last few lines of output; expanded it is a
 // terminal (prompt line, output tail, pi's truncation note). Colour stays grey
@@ -37,13 +37,6 @@ export type BashRun = {
   truncation?: BashTruncation;
   fullOutputPath?: string;
 };
-
-/**
- * How the card decides to open: `stream` opens while running and folds a
- * successful run when it ends; `pinned` opens new runs and otherwise follows
- * the user's own toggle (bash panel history).
- */
-export type BashCardBehavior = { kind: "stream" } | { kind: "pinned" };
 
 /** pi appends a status paragraph to a failing bash result; split it off. */
 const STATUS_TAIL =
@@ -108,15 +101,10 @@ function lastLines(text: string, limit: number): { text: string; hidden: number;
   return { text: lines.slice(hidden).join("\n"), hidden, lines: visible };
 }
 
-export function BashCard({
-  run,
-  behavior,
-}: {
-  run: BashRun;
-  behavior: BashCardBehavior;
-}): JSX.Element {
+export function BashCard({ run }: { run: BashRun }): JSX.Element {
   const failed = run.status !== undefined || (run.exitCode !== undefined && run.exitCode !== 0);
-  const auto = behavior.kind === "pinned" ? true : run.running || failed;
+  // A run opens while it streams and stays open if it failed.
+  const auto = run.running || failed;
   // null = follow the run state; a click pins the choice for this card.
   const [manual, setManual] = useState<boolean | null>(null);
   const open = manual ?? auto;

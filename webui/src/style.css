@@ -2047,20 +2047,6 @@ body {
   padding: 12px 0;
   text-align: center;
 }
-/* bash-panel 关闭按钮仍使用 panel-btn */
-.panel-btn {
-  background: none;
-  border: 1px solid var(--c-border);
-  border-radius: 8px;
-  padding: 3px 10px;
-  font-size: 12px;
-  color: var(--c-fg-secondary);
-  cursor: pointer;
-  font-family: var(--font-sans);
-}
-.panel-btn:hover {
-  color: var(--c-fg);
-}
 .session-meta {
   font-size: 11px;
   color: var(--c-fg-tertiary);
@@ -2402,62 +2388,6 @@ body {
 }
 .todo-card-item.done .todo-card-text {
   text-decoration: line-through;
-}
-
-/* === Bash 面板 (F-24) === */
-.bash-panel {
-  position: fixed;
-  top: 56px;
-  right: 0;
-  bottom: 0;
-  width: min(480px, 100vw);
-  background: var(--c-bg);
-  border-left: 1px solid var(--c-border);
-  display: flex;
-  flex-direction: column;
-  padding: 14px 16px;
-  z-index: 40;
-  gap: 10px;
-}
-.bash-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 14px;
-  font-weight: 700;
-}
-.bash-out {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.bash-out .bash-card {
-  margin: 0;
-}
-.bash-input-row {
-  display: flex;
-  gap: 8px;
-}
-.bash-input {
-  flex: 1;
-  font: inherit;
-  font-size: 13px;
-  padding: 7px 10px;
-  border: 1px solid var(--c-border);
-  border-radius: 8px;
-  outline: none;
-}
-.bash-input:focus {
-  border-color: var(--c-border-strong);
-}
-.bash-ctx-toggle {
-  font-size: 12px;
-  color: var(--c-fg-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 /* === 投递方式切换 (F-16) === */

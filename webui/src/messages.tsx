@@ -356,7 +356,7 @@ export function MessageView({
       // panel-run bash, which has no tool execution. Same card either way.
       return (
         <div class="msg-assistant narrow">
-          <BashCard run={bashRunFromMessage(bash)} behavior={{ kind: "stream" }} />
+          <BashCard run={bashRunFromMessage(bash)} />
         </div>
       );
     }

@@ -227,13 +227,7 @@ export type ExtensionUiRequest = ExtensionUiDialog | ExtensionUiFireForget;
 export type ExtensionUiResponse =
   | { type: "extension_ui_response"; id: string; value?: string; confirmed?: boolean; cancelled?: true };
 
-// --- Bash / compaction / retry / misc events ---
-
-export interface BashExecutionUpdateEvent {
-  type: "bash_execution_update";
-  id: string;
-  delta: string;
-}
+// --- Compaction / retry / misc events ---
 
 export interface CompactionStartEvent {
   type: "compaction_start";
@@ -319,7 +313,6 @@ export type WireRecord =
   | ToolExecutionUpdateEvent
   | ToolExecutionEndEvent
   | QueueUpdateEvent
-  | BashExecutionUpdateEvent
   | CompactionStartEvent
   | CompactionEndEvent
   | AutoRetryStartEvent
