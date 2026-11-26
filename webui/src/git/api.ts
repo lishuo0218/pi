@@ -292,6 +292,12 @@ function parseDraftFrame(raw: string): DraftFrame | null {
 }
 
 /**
+ * The page's copy is Simplified Chinese; the drafted message follows it, so a
+ * translated UI changes this line and the matching rules in the bridge.
+ */
+const UI_LANGUAGE = "zh";
+
+/**
  * Ask for an AI commit message, delivering the text as it arrives: the reply is
  * a stream of snapshots, so the box fills while the model writes. Aborting
  * `signal` stops the model run and leaves the text received so far in place.
@@ -302,7 +308,7 @@ export async function streamGitDraft(handlers: {
 }): Promise<GitResult> {
   let res: Response;
   try {
-    res = await fetch("/api/git/draft", { method: "POST", signal: handlers.signal });
+    res = await fetch(`/api/git/draft?lang=${UI_LANGUAGE}`, { method: "POST", signal: handlers.signal });
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error), code: "failed" };
   }

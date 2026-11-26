@@ -3,7 +3,7 @@
 // closing the request (the page's Stop button aborts the fetch) kills it and
 // the text written so far stays in the box.
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { draftCommitMessage } from "./message.ts";
+import { draftCommitMessage, type DraftLanguage } from "./message.ts";
 import { resolveRepo } from "./repo.ts";
 import type { GitErrorCode } from "./types.ts";
 
@@ -13,9 +13,19 @@ type DraftFrame =
   | { type: "done"; message: string }
   | { type: "error"; error: string; code: GitErrorCode };
 
+/**
+ * Message language from `?lang=`; the page sends the language of its own copy.
+ * Query input, so anything but the two known values falls back to the page's
+ * language instead of reaching the prompt.
+ */
+function parseLanguage(request: IncomingMessage): DraftLanguage {
+  const lang = new URL(request.url ?? "/", "http://bridge.invalid").searchParams.get("lang");
+  return lang === "en" ? "en" : "zh";
+}
+
 /** POST /api/git/draft: `snapshot` frames, then one `done` or `error` frame. */
 export function handleGitDraftStream(
-  _request: IncomingMessage,
+  request: IncomingMessage,
   response: ServerResponse,
   cwd: string,
   piPath: string,
@@ -46,6 +56,7 @@ export function handleGitDraftStream(
       return;
     }
     const result = await draftCommitMessage(resolution.repo, piPath, {
+      language: parseLanguage(request),
       signal: controller.signal,
       onSnapshot: (text) => send({ type: "snapshot", text }),
     });

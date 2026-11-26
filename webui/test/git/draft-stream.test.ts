@@ -72,6 +72,24 @@ describe("POST /api/git/draft", () => {
     }
   });
 
+  it("follows the message language from the query string", async () => {
+    const repo = await stagedRepo();
+    // The stub reports which language rule reached the prompt.
+    const piPath = await stubPi(
+      'let input = "";\nprocess.stdin.on("data", (chunk) => (input += chunk));\nprocess.stdin.on("end", () => process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: input.includes("English only") ? "english" : "chinese" } }) + "\\n"));\n',
+    );
+    const serving = await serve(repo.dir, piPath);
+    try {
+      const english = await (await fetch(`${serving.url}/api/git/draft?lang=en`, { method: "POST" })).text();
+      expect(english).toContain('"message":"english"');
+      // An unknown value falls back to the page's own language.
+      const unknown = await (await fetch(`${serving.url}/api/git/draft?lang=xx`, { method: "POST" })).text();
+      expect(unknown).toContain('"message":"chinese"');
+    } finally {
+      await serving.close();
+    }
+  });
+
   it("answers with one error frame when there is no repository", async () => {
     const dir = await makeDir();
     fixtures.push(dir);

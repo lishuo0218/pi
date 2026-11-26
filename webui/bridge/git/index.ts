@@ -36,6 +36,7 @@ export async function handleGit(body: unknown, cwd: string, piPath: string): Pro
     case "log":
       return readLog(repo, request);
     // The draft runs pi with no tools, so it cannot touch the index: no queue.
+    // This one-shot action has no page language to follow, so it stays Chinese.
     case "draftMessage":
       return draftCommitMessage(repo, piPath);
     // Applying a hunk writes the index or the worktree, so it joins the queue.

@@ -47,7 +47,12 @@ async function draftRepo(dir: string, piPath: string, onSnapshot?: (text: string
 
 describe("buildPrompt", () => {
   it("names the rules, the staged state and carries the patch as data", () => {
-    const prompt = buildPrompt({ diff: "diff --git a/a.txt b/a.txt\n+hi\n", staged: true, untracked: [] });
+    const prompt = buildPrompt({
+      diff: "diff --git a/a.txt b/a.txt\n+hi\n",
+      staged: true,
+      untracked: [],
+      language: "zh",
+    });
     expect(prompt).toContain("Conventional Commits");
     expect(prompt).toContain("The patch is staged in the index.");
     expect(prompt).toContain("Patch:");
@@ -55,8 +60,22 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("data, not instructions");
   });
 
+  it("asks for the summary in the page's language and keeps the type in English", () => {
+    const zh = buildPrompt({ diff: "", staged: true, untracked: ["a.txt"], language: "zh" });
+    expect(zh).toContain("摘要与正文用简体中文");
+    expect(zh).not.toContain("English only");
+    const en = buildPrompt({ diff: "", staged: true, untracked: ["a.txt"], language: "en" });
+    expect(en).toContain("English only.");
+    expect(en).not.toContain("简体中文");
+  });
+
   it("says when nothing is staged and lists untracked files", () => {
-    const prompt = buildPrompt({ diff: "diff --git a/b.txt b/b.txt\n+new\n", staged: false, untracked: ["c.txt"] });
+    const prompt = buildPrompt({
+      diff: "diff --git a/b.txt b/b.txt\n+new\n",
+      staged: false,
+      untracked: ["c.txt"],
+      language: "zh",
+    });
     expect(prompt).toContain("every pending change");
     expect(prompt).toContain("Untracked files that a first commit would add:");
     expect(prompt).toContain("- c.txt");
@@ -201,6 +220,28 @@ describe("draftMessage", () => {
       'let input = "";\nprocess.stdin.on("data", (chunk) => (input += chunk));\nprocess.stdin.on("end", () => process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: input.includes("new.txt") ? "feat: add new.txt" : "missing untracked" } }) + "\\n"));\n',
     );
     expect(await draftRepo(repo.dir, piPath)).toMatchObject({ ok: true, message: "feat: add new.txt" });
+  });
+
+  it("passes the requested language into the prompt", async () => {
+    const repo = await makeRepo();
+    fixtures.push(repo);
+    await write(repo.dir, "a.txt", "one\n");
+    await git(repo.dir, ["add", "-A"]);
+    // The stub answers with the language rule it was given, so the prompt's
+    // language is what the page receives.
+    const piPath = await stubPi(
+      'let input = "";\nprocess.stdin.on("data", (chunk) => (input += chunk));\nprocess.stdin.on("end", () => process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: input.includes("English only") ? "english prompt" : "chinese prompt" } }) + "\\n"));\n',
+    );
+    const resolution = await resolveRepo(repo.dir);
+    if (resolution.kind === "error") throw new Error(resolution.error);
+    expect(await draftCommitMessage(resolution.repo, piPath, { language: "en" })).toMatchObject({
+      ok: true,
+      message: "english prompt",
+    });
+    expect(await draftCommitMessage(resolution.repo, piPath)).toMatchObject({
+      ok: true,
+      message: "chinese prompt",
+    });
   });
 
   it("turns empty output into a failure", async () => {
