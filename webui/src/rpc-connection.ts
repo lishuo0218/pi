@@ -8,16 +8,53 @@ type Listener = (record: WireRecord) => void;
 
 export type ConnState = "connecting" | "open" | "closed";
 
+/** Default response deadline; a command that never answers must not hang the UI. */
+const COMMAND_TIMEOUT_MS = 30_000;
+
+/**
+ * Commands that legitimately run for minutes (a bash command, a manual
+ * compaction, a session switch that spawns pi). They get their own completion
+ * signal (bash_execution_update / compaction_end / the attach response), so a
+ * deadline would report failures for work that is still going.
+ */
+const LONG_RUNNING_COMMANDS = new Set([
+  "bash",
+  "compact",
+  "clone",
+  "fork",
+  "switch_session",
+  "new_session",
+  "export_html",
+  // Bridge-side commands that spawn pi, or wait on the user (native folder
+  // dialog); their own completion is the signal.
+  "bridge_attach",
+  "bridge_new_session",
+  "bridge_restart_pi",
+  "bridge_pick_dir",
+]);
+
+type Pending = {
+  command: string;
+  resolve: (response: ResponseRecord) => void;
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
 export class RpcConnection {
   private ws: WebSocket | null = null;
   private nextId = 0;
-  private pending = new Map<string, { command: string; resolve: (r: ResponseRecord) => void }>();
+  private pending = new Map<string, Pending>();
   private listeners = new Set<Listener>();
   private stateListeners = new Set<(state: ConnState) => void>();
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private retryDelayMs = 500;
   private closedByUser = false;
   private currentState: ConnState = "connecting";
+  private readonly timeoutMs: number;
+
+  /** `timeoutMs` exists for tests; the UI uses the default deadline. */
+  constructor(options?: { timeoutMs?: number }) {
+    this.timeoutMs = options?.timeoutMs ?? COMMAND_TIMEOUT_MS;
+  }
 
   /** Latest connection state; lets late-mounting components skip the wait. */
   get state(): ConnState {
@@ -47,12 +84,9 @@ export class RpcConnection {
       if (record.type === "response") {
         const response = record as ResponseRecord;
         const id = typeof response.id === "string" ? response.id : undefined;
-        if (id) {
-          const entry = this.pending.get(id);
-          if (entry) {
-            this.pending.delete(id);
-            entry.resolve(response);
-          }
+        const entry = id ? this.pending.get(id) : undefined;
+        if (id && entry) {
+          this.settle(id, entry, response);
         }
       } else if (record.type === "bridge_error") {
         // The bridge rejected a command it could not forward (no live pi).
@@ -60,8 +94,7 @@ export class RpcConnection {
         const id = typeof record.for === "string" ? record.for : undefined;
         const entry = id ? this.pending.get(id) : undefined;
         if (id && entry) {
-          this.pending.delete(id);
-          entry.resolve({
+          this.settle(id, entry, {
             type: "response",
             command: entry.command,
             success: false,
@@ -75,16 +108,22 @@ export class RpcConnection {
     ws.onclose = () => {
       this.ws = null;
       // Reject in-flight commands so callers never hang on a dead socket.
-      for (const entry of this.pending.values()) {
-        entry.resolve({ type: "response", command: entry.command, success: false, error: "连接已断开" });
+      for (const [id, entry] of [...this.pending]) {
+        this.settle(id, entry, { type: "response", command: entry.command, success: false, error: "连接已断开" });
       }
-      this.pending.clear();
       this.setState("closed");
       if (!this.closedByUser) this.scheduleReconnect(url);
     };
     ws.onerror = () => {
       // onclose follows; nothing else to do here.
     };
+  }
+
+  /** Resolve a pending command exactly once and stop its deadline. */
+  private settle(id: string, entry: Pending, response: ResponseRecord): void {
+    if (!this.pending.delete(id)) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.resolve(response);
   }
 
   private scheduleReconnect(url: string): void {
@@ -107,7 +146,10 @@ export class RpcConnection {
   }
 
   /**
-   * Send a command; resolves with its correlated response.
+   * Send a command; resolves with its correlated response. Never rejects: a
+   * disconnected socket or a missed deadline resolves a failed response, so
+   * every caller has one error path (`res.success === false`).
+   *
    * A caller-supplied string id is kept: the `bash` command uses its id as
    * the correlation id of `bash_execution_update` events, so overwriting it
    * would make streamed output unmatchable (the response correlation still
@@ -116,12 +158,24 @@ export class RpcConnection {
   command(command: Command): Promise<ResponseRecord> {
     const id = typeof command.id === "string" && command.id ? command.id : `webui-${++this.nextId}`;
     const record = { ...command, id };
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        reject(new Error("not connected"));
+        resolve({ type: "response", command: command.type, success: false, id, error: "连接已断开" });
         return;
       }
-      this.pending.set(id, { command: command.type, resolve });
+      const entry: Pending = { command: command.type, resolve, timer: null };
+      if (!LONG_RUNNING_COMMANDS.has(command.type)) {
+        entry.timer = setTimeout(() => {
+          this.settle(id, entry, {
+            type: "response",
+            command: command.type,
+            success: false,
+            id,
+            error: "命令超时，未收到 pi 的响应",
+          });
+        }, this.timeoutMs);
+      }
+      this.pending.set(id, entry);
       this.ws.send(JSON.stringify(record));
     });
   }

@@ -284,6 +284,22 @@ export interface SessionEvent extends Record<string, unknown> {
   type: string;
 }
 
+/**
+ * One entry of `get_entries` (rpc-commands.md), limited to the fields the UI
+ * reads: the append-only session log, which still holds what a compaction
+ * summarized away.
+ */
+export type SessionEntryRecord = {
+  type: string;
+  id: string;
+  parentId: string | null;
+  timestamp?: string;
+  /** Present on type "message". */
+  message?: AgentMessage;
+  /** Present on type "compaction": first entry the summary kept. */
+  firstKeptEntryId?: string;
+};
+
 // --- Records ---
 
 export type ResponseRecord = {

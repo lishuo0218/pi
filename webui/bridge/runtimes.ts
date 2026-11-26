@@ -31,6 +31,13 @@ export type Runtime = {
    */
   stream: ProtocolRecord[] | null;
   /**
+   * Tool executions started but not ended yet, by toolCallId, in start order.
+   * Their records are replayed to a client that attaches mid-tool: get_messages
+   * only carries finished results, so without this the card degrades to a bare
+   * tool name with no args (no command, no path). Cleared when the run settles.
+   */
+  toolRuns: Map<string, ProtocolRecord[]>;
+  /**
    * Details of the last todo tool result, replayed to a client that attaches
    * later: the checklist must survive a reload even when compaction has dropped
    * the tool result from get_messages. Cleared when the session is replaced.
@@ -145,8 +152,12 @@ export class RuntimePool {
 
   /** Records to replay to a client that just hydrated from get_messages. */
   pendingRecords(): ProtocolRecord[] {
-    const records = [...(this.attached?.stream ?? [])];
-    const todoDetails = this.attached?.todoDetails;
+    const runtime = this.attached;
+    if (!runtime) return [];
+    // Chronological: the assistant message stream ends before its tools start.
+    const records = [...(runtime.stream ?? [])];
+    for (const run of runtime.toolRuns.values()) records.push(...run);
+    const todoDetails = runtime.todoDetails;
     // Rides with the stream replay so the panel restores before live records
     // resume, and from bridge memory rather than a message that may be gone.
     if (todoDetails !== undefined) records.push({ type: "todo_state", details: todoDetails });
@@ -193,6 +204,7 @@ export class RuntimePool {
 
   /** Spawn a runtime (resuming sessionPath when given), attach it, await its reply. */
   private async open(sessionPath: string | null, cwd: string): Promise<Runtime> {
+    const previous = this.attached;
     const runtime = this.spawn(sessionPath, cwd);
     this.setAttached(runtime);
     try {
@@ -200,6 +212,10 @@ export class RuntimePool {
     } catch (error) {
       this.remove(runtime);
       void runtime.pi.stopAndWait();
+      // The new runtime never became usable. Leave the browser attached to the
+      // session it was showing instead of to a dead process: otherwise the UI
+      // looks connected while every command fails with "pi not running".
+      if (previous && this.runtimes.has(previous)) this.setAttached(previous);
       throw error;
     }
     return runtime;
@@ -232,6 +248,7 @@ export class RuntimePool {
       probe: null,
       stateProbeId: null,
       stream: null,
+      toolRuns: new Map(),
       todoDetails: undefined,
     };
     this.runtimes.add(runtime);
@@ -312,6 +329,21 @@ export class RuntimePool {
     ) {
       runtime.stream = null;
     }
+    // Same for tools in flight: a client attaching now must see the running
+    // card with its args, and only the latest partial output (updates carry the
+    // accumulated text, not a delta).
+    if (record.type === "tool_execution_start") {
+      const id = String(record.toolCallId);
+      runtime.toolRuns.set(id, [record]);
+    } else if (record.type === "tool_execution_update") {
+      const run = runtime.toolRuns.get(String(record.toolCallId));
+      if (run) run.splice(1, 1, record);
+    } else if (record.type === "tool_execution_end") {
+      runtime.toolRuns.delete(String(record.toolCallId));
+    } else if (record.type === "agent_start" || record.type === "agent_settled" || record.type === "error") {
+      // A run that settled (or failed) leaves no tool running behind it.
+      runtime.toolRuns.clear();
+    }
     if (record.type === "tool_execution_end" && record.toolName === "todo") {
       const result = record.result as { details?: unknown } | undefined;
       if (result?.details !== undefined) runtime.todoDetails = result.details;
@@ -375,6 +407,11 @@ export class RuntimePool {
     const now = Date.now();
     for (const runtime of [...this.runtimes]) {
       if (runtime === this.attached || runtime.running) continue;
+      // An unsaved session has no session file, so it is not listed in the
+      // sidebar: stopping it would make its conversation unreachable until the
+      // process is gone (a page reload attaches to the live runtime). The count
+      // stays bounded by "new session, never messaged, then switched away".
+      if (runtime.sessionPath === null) continue;
       if (now - runtime.lastActive < ttl) continue;
       this.remove(runtime);
       void runtime.pi.stopAndWait();

@@ -22,6 +22,8 @@ export type BindHandlers = {
   onToast?: (text: string, err?: boolean) => void;
   onRetry?: (info: RetryInfo | null) => void;
   onCompactionEnd?: () => void;
+  /** A compaction is running (started or finished, aborted and failed included). */
+  onCompacting?: (compacting: boolean) => void;
 };
 
 export function bindRecords(
@@ -59,11 +61,13 @@ export function bindRecords(
       }
       case "compaction_start": {
         const ev = record as Extract<WireRecord, { type: "compaction_start" }>;
+        handlers.onCompacting?.(true);
         handlers.onToast?.(`正在压缩上下文（${ev.reason === "manual" ? "手动" : ev.reason === "threshold" ? "阈值" : "溢出恢复"}）`);
         break;
       }
       case "compaction_end": {
         const ev = record as Extract<WireRecord, { type: "compaction_end" }>;
+        handlers.onCompacting?.(false);
         if (ev.aborted) handlers.onToast?.("压缩已中止", true);
         else if (ev.errorMessage) handlers.onToast?.(`压缩失败：${ev.errorMessage}`, true);
         else if (ev.result) {
@@ -138,7 +142,7 @@ export function bindRecords(
       }
       case "tool_execution_end": {
         const ev = record as Extract<WireRecord, { type: "tool_execution_end" }>;
-        tools.end(ev.toolCallId, ev.result, ev.isError, ev.durationMs);
+        tools.end(ev.toolCallId, ev.toolName, ev.result, ev.isError, ev.durationMs);
         if (ev.toolName === "todo") todo.setFromDetails(ev.result?.details);
         break;
       }

@@ -22,12 +22,14 @@ import { IconGit, IconImage, IconMenu, IconMoon, IconSun, IconColumns } from "./
 import { BashPanel } from "./bash-panel";
 import { GitView } from "./git/git-view";
 import { sessionFiles } from "./session-files";
+import { droppedMessages } from "./session-history";
+import { duplicateBashRows, renderedRows } from "./stream-rows";
 import { TurnFilesCard } from "./turn-files-card";
 import { getPiCwd } from "./pi-cwd";
 import { setPiCwd as reportPiCwd } from "./pi-cwd";
 import { initTheme, toggleTheme, watchSystemTheme, type Theme } from "./theme";
 import { DEFAULT_KEYBINDINGS, matchesKey } from "./keybindings";
-import type { AgentMessage, AssistantMessage, CommandInfo, ExtensionUiDialog, ExtensionUiResponse, Model, ToolResultMessage, UserMessage } from "./protocol";
+import type { AgentMessage, AssistantMessage, CommandInfo, ExtensionUiDialog, ExtensionUiResponse, Model, SessionEntryRecord, ToolResultMessage, UserMessage } from "./protocol";
 
 const store = new SessionStore();
 const tools = new ToolStore();
@@ -39,6 +41,52 @@ type ContextUsage = { tokens: number; contextWindow: number; percent: number } |
 
 type Attachment = { id: number; data: string; mimeType: string; previewUrl: string };
 let attachSeq = 0;
+
+/** A dialog belongs to the session attached when it arrived (see respondUi). */
+type QueuedDialog = ExtensionUiDialog & { sessionFile: string | null };
+
+/** Files a tool call that no user row can place (pre-compaction history). */
+const ORPHAN_TURN = { index: 0, timestamp: 0, preview: "" };
+
+/** Tool-call args of a message list, by toolCallId (toolResults carry none). */
+function callArgsOf(messages: AgentMessage[]): Map<string, Record<string, unknown>> {
+  const callArgs = new Map<string, Record<string, unknown>>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const block of (message as AssistantMessage).content ?? []) {
+      if (block.type !== "toolCall") continue;
+      const args = block.arguments;
+      if (args && typeof args === "object" && !Array.isArray(args)) {
+        callArgs.set(block.id, args as Record<string, unknown>);
+      }
+    }
+  }
+  return callArgs;
+}
+
+/**
+ * Apply a get_messages snapshot to the stores: turn grouping (the same count as
+ * the live binder, so file cards keep their turn), tool cards from the
+ * toolResult messages plus the assistant call args, the checklist, and the
+ * rows. Leaves the live queue untouched; rehydration re-applies it.
+ */
+function applyMessages(messages: AgentMessage[]): void {
+  tools.beginHydrate();
+  const callArgs = callArgsOf(messages);
+  for (const message of messages) {
+    if (message.role === "user") {
+      const user = message as UserMessage;
+      tools.beginTurn(user.timestamp, turnPreview(user.content));
+    } else if (message.role === "toolResult") {
+      const result = message as ToolResultMessage;
+      tools.addFromToolResult(result, callArgs.get(result.toolCallId) ?? {});
+      if (result.toolName === "todo") {
+        todo.setFromDetails((result as unknown as { details?: Record<string, unknown> }).details);
+      }
+    }
+  }
+  store.hydrate(messages, store.state);
+}
 
 function wsUrl(): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -65,7 +113,7 @@ export function App(): JSX.Element {
   // pi can hold several dialogs pending at once (each extension_ui_request
   // has its own id on the agent side), so they queue FIFO: answering the
   // front one reveals the next instead of dropping earlier requests.
-  const [dialogQueue, setDialogQueue] = useState<ExtensionUiDialog[]>([]);
+  const [dialogQueue, setDialogQueue] = useState<QueuedDialog[]>([]);
   const dialog = dialogQueue[0] ?? null;
   const [statuses, setStatuses] = useState(new Map<string, string>());
   const [widgets, setWidgets] = useState(new Map<string, { lines: string[]; placement: string }>());
@@ -86,9 +134,15 @@ export function App(): JSX.Element {
   const [readOnly, setReadOnly] = useState(false);
   const [piExited, setPiExited] = useState<{ code: number | null; signal: string | null } | null>(null);
   const [piCwd, setPiCwd] = useState<string | null>(null);
+  const [piError, setPiError] = useState<string | null>(null);
+  const [compacting, setCompacting] = useState(false);
   const [theme, setTheme] = useState<Theme>(initTheme);
   const injectSeq = useRef(0);
   const toastSeq = useRef(0);
+  /** Bumped by every record that finalizes streamed content (see rehydrate). */
+  const streamEndSeq = useRef(0);
+  /** Generation of the running rehydrate; older snapshots are discarded. */
+  const rehydrateSeq = useRef(0);
 
   // The stream/composer/banners shift left by this var when the sidebar shows.
   useLayoutEffect(() => {
@@ -130,87 +184,118 @@ export function App(): JSX.Element {
     }
   };
 
-  // Full rehydration after session switch / fork (F-01 again).
-  const rehydrate = async (): Promise<void> => {
-    tools.clear();
+  // Full rehydration after session switch / fork / reconnect (F-01 again).
+  // `resetUi` drops extension dialogs, status chips, widgets and the retry
+  // banner: they belong to the session being left. A compaction rehydrate
+  // keeps them, since its dialog is still pending in the same session.
+  const rehydrate = async (options?: { resetUi?: boolean }): Promise<void> => {
+    const gen = ++rehydrateSeq.current;
+    if (options?.resetUi) {
+      setDialogQueue([]);
+      setStatuses(new Map());
+      setWidgets(new Map());
+      setRetry(null);
+    }
+    // Only the per-turn derivation is stale; the live queue is not part of the
+    // snapshot and must survive a compaction rehydrate.
+    tools.beginHydrate();
     todo.clear();
+    // A message that finishes while the snapshot is in flight makes it stale:
+    // the bridge stops replaying at message_end, so neither the snapshot nor
+    // the replay carries it. Detect that and ask once more (see below).
+    const endsBefore = streamEndSeq.current;
     const [stateRes, messagesRes] = await Promise.all([
       conn.command({ type: "get_state" }),
       conn.command({ type: "get_messages" }),
     ]);
-    if (stateRes.success) {
-      const data = stateRes.data as {
-        model?: Model;
-        thinkingLevel?: string;
-        isStreaming?: boolean;
-        sessionName?: string;
-        sessionFile?: string;
-        autoCompactionEnabled?: boolean;
-        steeringMode?: string;
-        followUpMode?: string;
-      };
-      store.setState({
-        model: data.model ?? null,
-        thinkingLevel: data.thinkingLevel ?? null,
-        isStreaming: data.isStreaming ?? false,
-        sessionName: data.sessionName ?? null,
-        sessionFile: data.sessionFile ?? null,
-        autoCompactionEnabled: data.autoCompactionEnabled ?? null,
-        steeringMode: data.steeringMode ?? null,
-        followUpMode: data.followUpMode ?? null,
-      });
-      // A turn that is already running keeps running across a page reload and
-      // across session switches (each session has its own pi runtime): restore
-      // the running state so the stop button and status dot come back.
-      setRunPhase(data.isStreaming ? "running" : "idle");
+    // A newer rehydrate started (rapid session switching): its snapshot wins.
+    if (gen !== rehydrateSeq.current) return;
+    if (!stateRes.success || !messagesRes.success) {
+      // Never leave a half-applied snapshot: the sidebar may already point at
+      // the new session while the body would still show the old transcript.
+      store.reset();
+      tools.clear();
+      setRunPhase("idle");
+      pushToast(stateRes.error ?? messagesRes.error ?? "会话恢复失败", true);
+      return;
     }
-    if (messagesRes.success) {
-      const { messages } = messagesRes.data as { messages: AgentMessage[] };
-      // toolResult messages carry no call args; the matching assistant
-      // message's toolCall block does. Collect them first so hydrated cards
-      // keep their path/command summaries (F-12).
-      const callArgs = new Map<string, Record<string, unknown>>();
-      for (const m of messages) {
-        if ((m as { role?: string }).role !== "assistant") continue;
-        for (const block of (m as AssistantMessage).content ?? []) {
-          if (block.type === "toolCall") {
-            const args = block.arguments;
-            if (args && typeof args === "object" && !Array.isArray(args)) {
-              callArgs.set(block.id, args as Record<string, unknown>);
-            }
-          }
-        }
-      }
-      for (const m of messages) {
-        const role = (m as { role?: string }).role;
-        if (role === "user") {
-          // Count turns in the same order the live binder did, so files keep
-          // their turn grouping after a switch or reload.
-          const user = m as UserMessage;
-          tools.beginTurn(user.timestamp, turnPreview(user.content));
-        } else if (role === "toolResult") {
-          tools.addFromToolResult(m as ToolResultMessage, callArgs.get((m as ToolResultMessage).toolCallId) ?? {});
-          // Restore the checklist from the last todo tool result.
-          if ((m as ToolResultMessage).toolName === "todo") {
-            const details = (m as unknown as { details?: Record<string, unknown> }).details;
-            todo.setFromDetails(details);
-          }
-        }
-      }
-      store.hydrate(messages, store.state);
-    }
+    const data = stateRes.data as {
+      model?: Model;
+      thinkingLevel?: string;
+      isStreaming?: boolean;
+      isCompacting?: boolean;
+      pendingMessageCount?: number;
+      sessionName?: string;
+      sessionFile?: string;
+      autoCompactionEnabled?: boolean;
+      steeringMode?: string;
+      followUpMode?: string;
+    };
+    store.setState({
+      model: data.model ?? null,
+      thinkingLevel: data.thinkingLevel ?? null,
+      isStreaming: data.isStreaming ?? false,
+      sessionName: data.sessionName ?? null,
+      sessionFile: data.sessionFile ?? null,
+      autoCompactionEnabled: data.autoCompactionEnabled ?? null,
+      steeringMode: data.steeringMode ?? null,
+      followUpMode: data.followUpMode ?? null,
+    });
+    // A turn that is already running keeps running across a page reload and
+    // across session switches (each session has its own pi runtime): restore
+    // the running state so the stop button and status dot come back.
+    setRunPhase(data.isStreaming ? "running" : "idle");
+    setCompacting(data.isCompacting === true);
+    // Steering/follow-up texts are pi-internal; the count is not, so a queued
+    // message still shows as queued after a reload (F-01).
+    tools.setPendingCount(data.pendingMessageCount ?? null);
+    applyMessages((messagesRes.data as { messages: AgentMessage[] }).messages);
     // A session (and possibly cwd) switch invalidates the open preview path.
     closePreview();
-    // get_messages has no in-progress message: ask the bridge to replay the
-    // records of the turn still streaming (page reload / session switch in
-    // the middle of a run). They arrive before this response and land in the
-    // store the binder just hydrated.
+    if (streamEndSeq.current !== endsBefore) {
+      const again = await conn.command({ type: "get_messages" });
+      if (gen !== rehydrateSeq.current) return;
+      if (again.success) applyMessages((again.data as { messages: AgentMessage[] }).messages);
+    }
+    // The snapshot has landed, so ask the bridge for the records of the turn
+    // still streaming (page reload / session switch in the middle of a run).
+    // They arrive before this response and land in the store applied above.
     await conn.command({ type: "bridge_resume" });
+    if (gen !== rehydrateSeq.current) return;
+    // Messages before the last compaction are not in get_messages anymore.
+    // Keep them ready so "load earlier" can reach past the boundary.
+    const entriesRes = await conn.command({ type: "get_entries" });
+    if (gen !== rehydrateSeq.current) return;
+    if (entriesRes.success) {
+      const entries = entriesRes.data as { entries?: SessionEntryRecord[]; leafId?: string | null };
+      store.setEarlier(droppedMessages(entries.entries ?? [], entries.leafId ?? null));
+    }
     await refreshStats();
   };
 
   useEffect(() => {
-    const unsubState = conn.onState(setConnState);
+    let everOpened = false;
+    const unsubState = conn.onState((state) => {
+      setConnState(state);
+      // Records broadcast while the socket was down are gone (the bridge drops
+      // them for a client that is not there), so a reopened socket re-aligns
+      // from get_state/get_messages instead of trusting the local copy.
+      if (state === "open") {
+        if (everOpened) void rehydrate({ resetUi: true });
+        everOpened = true;
+      }
+    });
+    // Content a snapshot can miss: a message that finalizes while get_messages
+    // is in flight is in neither the snapshot nor the replay (see rehydrate).
+    const unsubStreamEnd = conn.onRecord((record) => {
+      if (
+        record.type === "message_end" ||
+        record.type === "tool_execution_end" ||
+        record.type === "agent_settled"
+      ) {
+        streamEndSeq.current++;
+      }
+    });
     // M4 lifecycle/notice records (not protocol events, bridge-owned).
     const unsubLifecycle = conn.onRecord((record) => {
       const type = record.type;
@@ -219,6 +304,7 @@ export function App(): JSX.Element {
         setPiExited({ code: ev.code ?? null, signal: ev.signal ?? null });
         setRunPhase("idle");
       } else if (type === "pi_started") {
+        setPiError(null);
         // The lifecycle record carries pi's cwd; it changes when a session is
         // created in another directory, so the sidebar dialog can default to it.
         const cwd = (record as { cwd?: string }).cwd;
@@ -230,12 +316,20 @@ export function App(): JSX.Element {
         if (piExitedRef.current) {
           pushToast("pi 已重启，正在恢复会话");
           setPiExited(null);
-          void rehydrate();
+          // The extension dialogs of the dead process can never be answered.
+          void rehydrate({ resetUi: true });
         }
         // Protocol-match hint (PRD: 协议回退): piVersion empty = probe failed.
         if ((record as { piVersion?: string }).piVersion === "") {
           pushToast("pi 版本未知，协议可能不匹配", true);
         }
+      } else if (type === "pi_error") {
+        // Spawn/attach failed bridge-side: without this the UI keeps looking
+        // connected while every command answers "pi process is not running".
+        const message = (record as { message?: string }).message ?? "未知错误";
+        setPiError(message);
+        setRunPhase("idle");
+        pushToast(`pi 出错：${message}`, true);
       } else if (type === "bridge_notice") {
         if (record.notice === "taken_over") {
           setReadOnly(true);
@@ -271,7 +365,9 @@ export function App(): JSX.Element {
               setDialogQueue((q) => {
                 // Already queued (e.g. reconnect re-request)? Keep the first.
                 if (q.some((d) => d.id === req.id)) return q;
-                return [...q, req];
+                // Tag it with the session it came from: a reply is only
+                // meaningful to the pi runtime attached then.
+                return [...q, { ...req, sessionFile: store.state.sessionFile }];
               });
               break;
             }
@@ -311,6 +407,7 @@ export function App(): JSX.Element {
         },
         onToast: pushToast,
         onRetry: setRetry,
+        onCompacting: setCompacting,
         onCompactionEnd: () => {
           void refreshStats();
           void rehydrate();
@@ -356,6 +453,7 @@ export function App(): JSX.Element {
 
     return () => {
       unsubState();
+      unsubStreamEnd();
       unsubLifecycle();
       unsubRecords();
       unsubSystemTheme();
@@ -389,7 +487,9 @@ export function App(): JSX.Element {
 
   const running = runPhase !== "idle";
   const state = store.state;
-  const queueCount = tools.steering.length + tools.followUp.length;
+  // The queue texts are pi-internal: before the first queue_update the bar
+  // shows the count get_state reported, so a reload keeps it visible.
+  const queueCount = tools.pendingCount ?? tools.steering.length + tools.followUp.length;
   void version;
   void toolVersion;
 
@@ -414,7 +514,7 @@ export function App(): JSX.Element {
       if (data.cancelled) pushToast("分叉被扩展取消", true);
       else {
         pushToast("已分叉");
-        await rehydrate();
+        await rehydrate({ resetUi: true });
       }
     } else {
       pushToast(forkRes.error ?? "分叉失败", true);
@@ -423,6 +523,20 @@ export function App(): JSX.Element {
 
   const respondUi = (value: string | undefined, confirmed: boolean | undefined): void => {
     if (!dialog) return;
+    // Only the attached tab may answer, and only for the session the dialog
+    // came from: the new session's pi would drop an unknown id and leave the
+    // old extension waiting forever.
+    const dropDialog = (): void => setDialogQueue((q) => q.filter((d) => d.id !== dialog.id));
+    if (readOnly) {
+      dropDialog();
+      pushToast("本页只读，无法回复扩展", true);
+      return;
+    }
+    if (dialog.sessionFile !== store.state.sessionFile) {
+      dropDialog();
+      pushToast("该对话框属于已离开的会话", true);
+      return;
+    }
     const response: ExtensionUiResponse =
       dialog.method === "confirm"
         ? { type: "extension_ui_response", id: dialog.id, confirmed }
@@ -433,7 +547,7 @@ export function App(): JSX.Element {
     // webui correlation id, and pi would drop the reply as unknown.
     conn.send(response);
     // Pop only the answered dialog; any remaining queued ones surface next.
-    setDialogQueue((q) => q.filter((d) => d.id !== dialog.id));
+    dropDialog();
   };
 
   return (
@@ -441,6 +555,7 @@ export function App(): JSX.Element {
       <Topbar
         connState={connState}
         running={running}
+        compacting={compacting}
         sessionName={state.sessionName}
         model={state.model}
         models={models}
@@ -491,10 +606,16 @@ export function App(): JSX.Element {
         }}
       />
       <MessageStream
+        // A different session is a different view: remounting drops the scroll
+        // position and the visible slice of the session left behind.
+        key={store.epoch}
         running={running}
         theme={theme}
         onFork={(text, occurrence) => void forkFrom(text, occurrence)}
       />
+      {piError ? (
+        <div class="retry-banner crash">pi 未能启动：{piError}（请检查 bridge 日志后刷新）</div>
+      ) : null}
       {piExited ? (
         <div class="retry-banner crash">
           pi 已退出（code {piExited.code ?? "?"}{piExited.signal ? ` · ${piExited.signal}` : ""}），
@@ -577,13 +698,16 @@ export function App(): JSX.Element {
           conn={conn}
           store={store}
           piCwd={piCwd}
+          readOnly={readOnly}
           onSwitched={() => {
             // The bash panel's output belongs to the session being left; it
             // cannot be rebuilt from get_state/get_messages. The Git drawer
             // follows the attached cwd, so it would show another repo.
             setShowBash(false);
             setShowGit(false);
-            void rehydrate();
+            // Extension dialogs, status chips, widgets and the retry banner
+            // belong to the session being left.
+            void rehydrate({ resetUi: true });
           }}
           onToast={pushToast}
         />
@@ -623,6 +747,7 @@ function fmtTokens(n: number): string {
 function Topbar(props: {
   connState: ConnState;
   running: boolean;
+  compacting: boolean;
   sessionName: string | null;
   model: { id: string; name: string; provider: string } | null;
   models: Model[];
@@ -667,6 +792,7 @@ function Topbar(props: {
         class={`status-dot ${props.running ? "running" : "idle"}`}
         title={props.running ? "运行中" : "空闲"}
       />
+      {props.compacting ? <span class="ctx-usage" title="正在压缩上下文，请稍候">压缩中…</span> : null}
       {props.sessionCost ? <span class="session-cost">{props.sessionCost}</span> : null}
       {props.contextUsage ? (
         <span
@@ -764,29 +890,19 @@ function MessageStream({
   const [follow, setFollow] = useState(true);
   // 分区懒渲染 (PRD 性能): only the tail slice is mounted; "加载更早" grows it.
   const [visibleCount, setVisibleCount] = useState(50);
-  const rows = store.rows;
+  // Only rows that draw something may take a slice slot: a hydrated session
+  // has one toolResult row per tool call (rendered as the tool card, not as a
+  // row) plus a system message per tool-set change (never rendered). Counting
+  // them made "还有 N 条" mostly phantom and could slice a turn in half.
+  const visible = renderedRows(store.rows, tools.executions);
+  // A bash tool execution is already rendered as a ToolCard in the assistant
+  // message; pi also writes a bashExecution transcript row for the same run,
+  // so command and output would show twice. Pair them by command text (see
+  // duplicateBashRows); a panel-run bash has no execution and stays visible.
+  const hiddenBashRows = duplicateBashRows(visible, [...tools.executions.values()]);
+  const rows = hiddenBashRows.size === 0 ? visible : visible.filter((row) => !hiddenBashRows.has(row.id));
   const hiddenCount = Math.max(0, rows.length - visibleCount);
   const visibleRows = rows.slice(-visibleCount);
-  // A bash tool execution is already rendered as a ToolCard in the assistant
-  // message; pi also adds a bashExecution transcript row for the same run, so
-  // the command and output would show twice. Pair transcript rows with the
-  // store's bash executions in order and hide the matched rows. Live
-  // executions and hydrated ones (args restored from the assistant toolCall
-  // block) pair by exact command; panel-run bash has no tool execution, so
-  // its row is never paired and stays visible.
-  const bashExecutions = [...tools.executions.values()].filter((e) => e.toolName === "bash");
-  const hiddenBashRows = new Set<string>();
-  let bashRowIndex = 0;
-  for (const row of rows) {
-    if (row.kind === "message" && row.message.role === "bashExecution") {
-      const bash = row.message as { command: string };
-      const exec = bashExecutions[bashRowIndex];
-      if (exec && (exec.args.command ? exec.args.command === bash.command : true)) {
-        hiddenBashRows.add(row.id);
-      }
-      bashRowIndex += 1;
-    }
-  }
   // The last assistant row of each turn (just before the next user message, or
   // the end of the stream) carries the time / token footer. A turn's assistant
   // rows are interleaved with toolResult rows, so only a user row closes it.
@@ -862,7 +978,23 @@ function MessageStream({
     const el = scrollRef.current;
     const prevHeight = el?.scrollHeight ?? 0;
     const prevTop = el?.scrollTop ?? 0;
-    setVisibleCount((c) => c + 100);
+    if (hiddenCount > 0) {
+      setVisibleCount((c) => c + Math.min(100, hiddenCount));
+    } else {
+      // Nothing older is hidden in the transcript, so the rest of the history is
+      // behind the last compaction, which only get_entries still has.
+      const earlier = store.takeEarlier();
+      if (earlier.length === 0) return;
+      const callArgs = callArgsOf(earlier);
+      for (const message of earlier) {
+        if (message.role !== "toolResult") continue;
+        const result = message as ToolResultMessage;
+        tools.addFromToolResult(result, callArgs.get(result.toolCallId) ?? {}, ORPHAN_TURN);
+      }
+      store.prepend(earlier);
+      // Reveal the prepended rows in this click instead of one click later.
+      setVisibleCount((c) => c + earlier.length);
+    }
     // Keep the viewport anchored to the same content after prepending rows:
     // shift by exactly the height that was added above the old position.
     requestAnimationFrame(() => {
@@ -871,14 +1003,23 @@ function MessageStream({
     });
   };
 
+  // "Load earlier" is worth showing while anything is hidden: rows beyond the
+  // slice, or pre-compaction messages get_entries still holds.
+  const earlierLabel =
+    hiddenCount > 0
+      ? `加载更早消息（还有 ${hiddenCount} 条）`
+      : store.hasEarlier()
+        ? "加载压缩前的历史消息"
+        : null;
+
   return (
     <div class="stream-scroll" ref={scrollRef} onScroll={onScroll}>
       <div class="stream">
-        {hiddenCount > 0 ? (
+        {earlierLabel === null ? null : (
           <button class="load-earlier" onClick={loadEarlier}>
-            加载更早消息（还有 {hiddenCount} 条）
+            {earlierLabel}
           </button>
-        ) : null}
+        )}
         {orphanTurns.map((turn) => (
           <div class="narrow" key={`files-${turn.index}`}>
             <TurnFilesCard turn={turn} cwd={cwd} theme={theme} />
@@ -897,7 +1038,6 @@ function MessageStream({
               <Fragment key={row.id}>
                 <RowView
                   row={row}
-                  hideBash={hiddenBashRows.has(row.id)}
                   onFork={onFork}
                   forkOccurrence={forkOccurrence.get(row.id) ?? 0}
                   atTurnEnd={turnEndRows.has(row.id)}
@@ -923,13 +1063,11 @@ function MessageStream({
 
 function RowView({
   row,
-  hideBash,
   onFork,
   forkOccurrence,
   atTurnEnd,
 }: {
   row: StreamRow;
-  hideBash: boolean;
   onFork: (text: string, occurrence: number) => void;
   forkOccurrence: number;
   atTurnEnd: boolean;
@@ -938,7 +1076,6 @@ function RowView({
     <MessageView
       message={row.message}
       toolStore={tools}
-      hideBash={hideBash}
       onFork={onFork}
       forkOccurrence={forkOccurrence}
       atTurnEnd={atTurnEnd}

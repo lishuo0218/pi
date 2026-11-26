@@ -16,8 +16,7 @@ import { ListCard } from "./list-card";
 import { toolPathArg } from "./path-label";
 
 /** One-line human summary of the tool call from its args. */
-export function toolSummary(exec: ToolExecution): string {
-  const args = exec.args as Record<string, unknown>;
+export function toolSummary(args: Record<string, unknown>): string {
   const command = args.command;
   if (typeof command === "string") return command.replace(/\s+/g, " ").slice(0, 120);
   const path = toolPathArg(args);
@@ -194,7 +193,7 @@ export function ToolCard({ exec }: { exec: ToolExecution }): JSX.Element {
     return <ListCard exec={exec} />;
   }
   const running = exec.state === "running";
-  const summary = toolSummary(exec);
+  const summary = toolSummary(exec.args);
   // Global layout preference; the toggle flips it for every open card.
   const [layout, setLayoutState] = useState<DiffLayout>(getDiffLayout);
   useEffect(() => onDiffLayoutChange(() => setLayoutState(getDiffLayout())), []);

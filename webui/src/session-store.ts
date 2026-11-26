@@ -102,6 +102,17 @@ export class SessionStore {
   };
   /** Bumped on every mutation; the UI listens to this via subscription. */
   version = 0;
+  /**
+   * Bumped when the store switches to another session, so views that hold
+   * per-session view state (scroll position, visible slice) remount instead of
+   * carrying the previous session's state into the new one.
+   */
+  epoch = 0;
+  /**
+   * Messages from before the last compaction, fetched from get_entries and
+   * revealed by "load earlier": get_messages cannot see them anymore.
+   */
+  private earlier: AgentMessage[] = [];
   private subscribers = new Set<() => void>();
 
   subscribe(fn: () => void): () => void {
@@ -116,19 +127,56 @@ export class SessionStore {
 
   reset(): void {
     this.rows = [];
+    this.earlier = [];
     this.toolCallPaths.clear();
     this.emit();
   }
 
   /** Hydrate from get_messages + get_state (F-01). */
   hydrate(messages: AgentMessage[], state: AgentState): void {
+    this.noteSession(state.sessionFile);
     this.rows = messages.map((message) => ({ kind: "message", message, id: nextRowId() }));
+    this.earlier = [];
     this.toolCallPaths.clear();
     this.state = state;
     this.emit();
   }
 
+  /** Count a session switch so per-session view state resets; see `epoch`. */
+  private noteSession(sessionFile: string | null): void {
+    if ((sessionFile ?? "") === (this.state.sessionFile ?? "")) return;
+    // An empty session has no file yet, so "no session file" is its identity.
+    if (this.rows.length > 0) this.epoch++;
+  }
+
+  /** Pre-compaction messages get_entries reported; taken by "load earlier". */
+  setEarlier(messages: AgentMessage[]): void {
+    this.earlier = messages;
+    this.emit();
+  }
+
+  hasEarlier(): boolean {
+    return this.earlier.length > 0;
+  }
+
+  /** Hand the pre-compaction messages to the caller, which prepends them. */
+  takeEarlier(): AgentMessage[] {
+    const messages = this.earlier;
+    this.earlier = [];
+    return messages;
+  }
+
+  /** Insert rows in front of the transcript (older history, revealed later). */
+  prepend(messages: AgentMessage[]): void {
+    this.rows = [
+      ...messages.map((message) => ({ kind: "message", message, id: nextRowId() }) as StreamRow),
+      ...this.rows,
+    ];
+    this.emit();
+  }
+
   setState(patch: Partial<AgentState>): void {
+    if (patch.sessionFile !== undefined) this.noteSession(patch.sessionFile);
     this.state = { ...this.state, ...patch };
     this.emit();
   }

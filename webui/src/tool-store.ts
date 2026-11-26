@@ -69,6 +69,8 @@ export class ToolStore {
   turn: TurnInfo = { index: 0, timestamp: 0, preview: "" };
   steering: string[] = [];
   followUp: string[] = [];
+  /** Queue length reported by get_state when the queue itself is unknown. */
+  pendingCount: number | null = null;
   version = 0;
   private subscribers = new Set<() => void>();
 
@@ -107,16 +109,20 @@ export class ToolStore {
 
   end(
     toolCallId: string,
+    toolName: string,
     result: { content?: (TextContent | ImageContent)[]; details?: Record<string, unknown> } | undefined,
     isError: boolean,
     durationMs?: number,
   ): void {
     let exec = this.executions.get(toolCallId);
     if (!exec) {
-      // end without a seen start (e.g. reconnected mid-run): synthesize.
+      // end without a seen start (reconnected mid-run, or the start predates a
+      // rehydrate that cleared the store): synthesize from the end record,
+      // which carries the tool name. The args stay unknown until the assistant
+      // message is hydrated.
       exec = {
         toolCallId,
-        toolName: "",
+        toolName,
         args: {},
         turn: this.turn,
         state: "running",
@@ -129,9 +135,11 @@ export class ToolStore {
     } else if (exec.turn.index === 0) {
       // Start seen only after a rehydrate reset (reload mid-run): the reset
       // zeroed the turn, but a running call always belongs to the turn it
-      // started in, which hydration has restored by now.
+      // started in, which hydration has restored by now. Rehydrate is
+      // generation-guarded, so no other session's turn can land here.
       exec.turn = this.turn;
     }
+    exec.toolName = exec.toolName || toolName;
     exec.state = "done";
     exec.resultText = textOf(result?.content) || exec.partial;
     exec.resultImages = imagesOf(result?.content);
@@ -154,6 +162,8 @@ export class ToolStore {
   addFromToolResult(
     message: ToolResultMessage,
     args: Record<string, unknown>,
+    /** Turn override: pre-compaction history belongs to no user row here. */
+    turn?: TurnInfo,
   ): void {
     if (this.executions.has(message.toolCallId)) return;
     const details = (message as unknown as { details?: Record<string, unknown> }).details;
@@ -161,7 +171,7 @@ export class ToolStore {
       toolCallId: message.toolCallId,
       toolName: message.toolName,
       args,
-      turn: this.turn,
+      turn: turn ?? this.turn,
       state: "done",
       partial: "",
       resultText: textOf(message.content),
@@ -186,14 +196,33 @@ export class ToolStore {
   setQueue(steering: string[], followUp: string[]): void {
     this.steering = steering;
     this.followUp = followUp;
+    // The queue itself is now known: it replaces the count get_state reported.
+    this.pendingCount = null;
+    this.emit();
+  }
+
+  /** Queue length from get_state: the items themselves are pi-internal. */
+  setPendingCount(count: number | null): void {
+    this.pendingCount = count;
+    this.emit();
+  }
+
+  /**
+   * Rewind the per-turn derivation before a snapshot is applied (hydration can
+   * run twice: a second get_messages after a mid-flight message_end). Keeps the
+   * live queue, which the snapshot does not carry.
+   */
+  beginHydrate(): void {
+    this.executions.clear();
+    this.turn = { index: 0, timestamp: 0, preview: "" };
     this.emit();
   }
 
   clear(): void {
-    this.executions.clear();
-    this.turn = { index: 0, timestamp: 0, preview: "" };
+    this.beginHydrate();
     this.steering = [];
     this.followUp = [];
+    this.pendingCount = null;
     this.emit();
   }
 }

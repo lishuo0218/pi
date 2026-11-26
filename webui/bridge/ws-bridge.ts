@@ -41,8 +41,11 @@ export function broadcast(wss: WebSocketServer, record: ProtocolRecord): void {
   }
 }
 
+/** A browser record that is a command, not an event dump. */
+export type CommandRecord = ProtocolRecord & { type: string };
+
 /** True if the record is a command needing a response (has a type, not an event dump). */
-export function isCommand(record: ProtocolRecord): boolean {
+export function isCommand(record: ProtocolRecord): record is CommandRecord {
   return typeof record.type === "string" && record.type.length > 0;
 }
 
@@ -113,11 +116,17 @@ export function wireClient(ws: WebSocket, ctx: ClientContext): void {
       return;
     }
     if (!isCommand(record)) return;
-    // Read-only spectators (a newer tab took over) cannot send commands.
+    // Read-only spectators (a newer tab took over) cannot send commands. The
+    // rejection is answered through the normal response path: a bare notice
+    // left the caller's promise pending forever, so its UI stayed busy.
     if (!ctx.isActive()) {
-      ws.send(
-        JSON.stringify({ type: "bridge_notice", notice: "read_only", for: record.id ?? null }),
-      );
+      if (record.type === "extension_ui_response") return;
+      reply({
+        command: record.type,
+        id: record.id,
+        success: false,
+        error: "本页只读，已被新标签页接管",
+      });
       return;
     }
     switch (record.type) {

@@ -64,6 +64,12 @@ export class PiProcess {
 
   /** Ordered exits seen so far — lets stop() suppress onExit for its target. */
   private stopped = new Set<ChildProcessWithoutNullStreams>();
+  /**
+   * Exit of the child stop() was called on. stop() drops `child` right away,
+   * so callers that must wait for the process (Windows cannot delete a file an
+   * open process holds) need this rather than the live field.
+   */
+  private exitPromise: Promise<void> | null = null;
 
   start(): void {
     if (this.running) return;
@@ -100,6 +106,11 @@ export class PiProcess {
       process.stderr.write(`[pi stderr] ${chunk.toString("utf8")}`);
     });
 
+    // A write racing the child's exit fails the stdin stream: the exit (or
+    // spawn error) handler reports the real cause, so an EPIPE here must not
+    // reach the process-level 'uncaught error' path and kill the bridge.
+    child.stdin.on("error", () => {});
+
     child.on("error", (error) => this.events.onError(error));
     child.on("exit", (code, signal) => {
       // Identity guard: restartPi() spawns the replacement before the old
@@ -115,8 +126,9 @@ export class PiProcess {
 
   /** Write one protocol record to pi's stdin (JSONL, LF-terminated). */
   send(record: ProtocolRecord): boolean {
-    if (!this.running || !this.child) return false;
-    this.child.stdin.write(JSON.stringify(record) + "\n");
+    const child = this.child;
+    if (!this.running || !child || !child.stdin.writable) return false;
+    child.stdin.write(JSON.stringify(record) + "\n");
     return true;
   }
 
@@ -125,6 +137,7 @@ export class PiProcess {
     if (!this.child) return;
     const child = this.child;
     this.child = null;
+    this.exitPromise = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     // Mark as deliberately stopped: its later exit is shutdown, not a crash,
     // so the exit handler must not fire onExit (no auto-restart cascade).
     this.stopped.add(child);
@@ -151,10 +164,9 @@ export class PiProcess {
    * runtime stays open until exit, and Windows cannot delete an open file.
    */
   stopAndWait(): Promise<void> {
-    const child = this.child;
-    if (!child) return Promise.resolve();
-    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    this.stop();
-    return exited;
+    if (this.child) this.stop();
+    // A second stop() while the first is still draining must wait for the same
+    // exit: returning early let the caller delete/serve a file pi still holds.
+    return this.exitPromise ?? Promise.resolve();
   }
 }

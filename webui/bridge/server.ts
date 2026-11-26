@@ -21,6 +21,7 @@ import { handleListDir } from "./list-dir.ts";
 import { handleFilePreview } from "./file-preview.ts";
 import { handleGit } from "./git/index.ts";
 import { handleGitEvents } from "./git/events.ts";
+import { checkOrigin } from "./origin.ts";
 
 export type BridgeOptions = {
   port: number;
@@ -75,6 +76,22 @@ function checkToken(request: IncomingMessage, token: string | undefined): boolea
   return given.length === expected.length && given.equals(expected);
 }
 
+/** Header of an incoming request as a plain string (repeated headers dropped). */
+function headerOf(request: IncomingMessage, name: string): string | undefined {
+  const value = request.headers[name];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Gate for anything a browser can reach. The token is optional, so the Origin
+ * check is what stops a page on the internet from driving this agent: without
+ * it any site could open ws://127.0.0.1:<port>/ws, take over the active tab and
+ * run tools in the local working directory.
+ */
+function browserRequestAllowed(request: IncomingMessage, token: string | undefined): boolean {
+  return checkToken(request, token) && checkOrigin(headerOf(request, "origin")).allowed;
+}
+
 export function startBridge(opts: BridgeOptions): Promise<BridgeHandle> {
   return new Promise((resolve, reject) => {
     const posts = localPosts(opts.piPath);
@@ -83,7 +100,7 @@ export function startBridge(opts: BridgeOptions): Promise<BridgeHandle> {
       const localPost = posts[url];
       const localStream = LOCAL_STREAMS[url];
       if (localStream !== undefined && req.method === "GET") {
-        if (!checkToken(req, opts.token)) {
+        if (!browserRequestAllowed(req, opts.token)) {
           res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ error: "forbidden" }));
           return;
@@ -92,9 +109,9 @@ export function startBridge(opts: BridgeOptions): Promise<BridgeHandle> {
         return;
       }
       if (localPost && req.method === "POST") {
-        // Token-gated like /ws when a token is set: both endpoints read local
-        // files on behalf of the page.
-        if (!checkToken(req, opts.token)) {
+        // Token- and origin-gated like /ws when configured: both endpoints
+        // read local files on behalf of the page.
+        if (!browserRequestAllowed(req, opts.token)) {
           res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ error: "forbidden" }));
           return;
@@ -157,8 +174,21 @@ export function startBridge(opts: BridgeOptions): Promise<BridgeHandle> {
     const wss = new WebSocketServer({
       server,
       path: "/ws",
-      // Token check at the trust boundary: WS upgrade carries ?token=.
-      verifyClient: (info, cb) => cb(checkToken(info.req, opts.token)),
+      // Trust boundary: token (optional) and Origin (local pages only).
+      verifyClient: (info, cb) => {
+        const origin = checkOrigin(
+          typeof info.req.headers.origin === "string" ? info.req.headers.origin : undefined,
+        );
+        if (!origin.allowed) {
+          cb(false, 403, origin.reason);
+          return;
+        }
+        if (!checkToken(info.req, opts.token)) {
+          cb(false, 401, "forbidden");
+          return;
+        }
+        cb(true);
+      },
     });
 
     let lastExitCode: number | null = null;

@@ -91,6 +91,7 @@ export function Sidebar({
   conn,
   store,
   piCwd,
+  readOnly,
   onSwitched,
   onToast,
 }: {
@@ -98,6 +99,8 @@ export function Sidebar({
   store: SessionStore;
   /** Current pi working directory (from lifecycle); dialog default. */
   piCwd: string | null;
+  /** Another tab took over: writes are rejected, so do not offer them. */
+  readOnly: boolean;
   onSwitched: () => void;
   onToast?: (text: string, err?: boolean) => void;
 }): JSX.Element {
@@ -200,6 +203,17 @@ export function Sidebar({
     [conn],
   );
 
+  // A read-only tab (a newer one took over) must not send writes: the bridge
+  // rejects them, so this fails earlier with a reason and keeps the UI in step
+  // with what will be accepted.
+  const write = (command: Command): Promise<ResponseRecord> => {
+    if (readOnly) {
+      onToast?.("本页只读，已被新标签页接管", true);
+      return Promise.resolve({ type: "response", command: command.type, success: false, error: "本页只读" });
+    }
+    return conn.command(command);
+  };
+
   const current = store.state.sessionFile;
 
   // The group actually holding the current session. The bridge's `current`
@@ -297,7 +311,7 @@ export function Sidebar({
 
   const togglePin = async (session: SessionSummary): Promise<void> => {
     setMenu(null);
-    const res = await conn.command({ type: "bridge_toggle_pin", path: session.path } as Command);
+    const res = await write({ type: "bridge_toggle_pin", path: session.path } as Command);
     if (res.success) {
       const nowPinned = (res.data as { pinned?: boolean } | undefined)?.pinned;
       onToast?.(nowPinned ? "已置顶" : "已取消置顶");
@@ -313,7 +327,7 @@ export function Sidebar({
   // agent-session-runtime.ts teardownCurrent).
   const switchTo = async (path: string): Promise<boolean> => {
     setBusy(true);
-    const res = await conn.command({ type: "bridge_attach", sessionPath: path } as Command);
+    const res = await write({ type: "bridge_attach", sessionPath: path } as Command);
     setBusy(false);
     if (res.success) {
       onSwitched();
@@ -328,7 +342,7 @@ export function Sidebar({
   // nothing running is aborted either.
   const newSession = async (cwd?: string): Promise<boolean> => {
     setBusy(true);
-    const res = await conn.command({
+    const res = await write({
       type: "bridge_new_session",
       ...(cwd ? { cwd } : {}),
     } as Command);
@@ -344,7 +358,7 @@ export function Sidebar({
 
   const cloneSession = async (): Promise<void> => {
     setBusy(true);
-    const res = (await conn.command({ type: "clone" })) as ResponseRecord;
+    const res = (await write({ type: "clone" })) as ResponseRecord;
     setBusy(false);
     if (res.success) {
       const data = res.data as { cancelled?: boolean } | undefined;
@@ -372,7 +386,7 @@ export function Sidebar({
   const commitRename = async (): Promise<void> => {
     const name = renameValue.trim();
     setRenaming(null);
-    const res = await conn.command({ type: "set_session_name", name });
+    const res = await write({ type: "set_session_name", name });
     if (res.success) {
       store.setState({ sessionName: name || null });
       void load();
@@ -473,7 +487,7 @@ export function Sidebar({
         return;
       }
     }
-    const res = await conn.command({ type: "bridge_delete_session", path: session.path } as Command);
+    const res = await write({ type: "bridge_delete_session", path: session.path } as Command);
     setBusy(false);
     if (res.success) {
       onToast?.("已移入回收站");
@@ -484,19 +498,19 @@ export function Sidebar({
   };
 
   const setAutoCompaction = async (enabled: boolean): Promise<void> => {
-    const res = await conn.command({ type: "set_auto_compaction", enabled });
+    const res = await write({ type: "set_auto_compaction", enabled });
     if (res.success) store.setState({ autoCompactionEnabled: enabled });
     else onToast?.(res.error ?? "设置失败", true);
   };
 
   const setSteeringMode = async (mode: string): Promise<void> => {
-    const res = await conn.command({ type: "set_steering_mode", mode });
+    const res = await write({ type: "set_steering_mode", mode });
     if (res.success) store.setState({ steeringMode: mode });
     else onToast?.(res.error ?? "设置失败", true);
   };
 
   const setFollowUpMode = async (mode: string): Promise<void> => {
-    const res = await conn.command({ type: "set_follow_up_mode", mode });
+    const res = await write({ type: "set_follow_up_mode", mode });
     if (res.success) store.setState({ followUpMode: mode });
     else onToast?.(res.error ?? "设置失败", true);
   };

@@ -7,6 +7,7 @@ import type {
   AgentMessage,
   AssistantMessage,
   BashExecutionMessage,
+  CompactionSummaryMessage,
   ImageContent,
   ThinkingContent,
   TextContent,
@@ -16,7 +17,7 @@ import type {
 } from "./protocol";
 import { IconThinking } from "./icons";
 import { renderMarkdown } from "./markdown";
-import { ToolCard } from "./tool-card";
+import { ToolCard, toolSummary } from "./tool-card";
 import { BashCard, bashRunFromMessage } from "./bash-card";
 import type { ToolStore } from "./tool-store";
 
@@ -139,11 +140,16 @@ function AssistantBlock({
               />
             );
           }
-          // No execution seen (call only, aborted run): render a call-only stub.
+          // No execution seen (call only): print what the call was about. The
+          // bridge replays running tools, so this is a call whose run ended
+          // without a result (aborted) or one get_messages kept without its
+          // toolResult; a bare tool name would lose the command/path.
+          const summary = toolSummary(call.arguments);
           return (
             <div key={i} class="tool-card done">
               <div class="tool-head">
                 <span class="tool-name">{call.name}</span>
+                {summary ? <span class="tool-summary">{summary}</span> : null}
               </div>
             </div>
           );
@@ -212,15 +218,12 @@ function ToolResultBlock({
 export function MessageView({
   message,
   toolStore,
-  hideBash,
   onFork,
   forkOccurrence,
   atTurnEnd,
 }: {
   message: AgentMessage;
   toolStore: ToolStore;
-  /** Set by MessagesArea: this bashExecution row is a duplicate of a tool card. */
-  hideBash: boolean;
   onFork?: (text: string, occurrence: number) => void;
   /** nth occurrence (0-based) of this user message's text, for exact fork targeting. */
   forkOccurrence?: number;
@@ -263,15 +266,24 @@ export function MessageView({
     case "toolResult":
       return <ToolResultBlock message={message as ToolResultMessage} toolStore={toolStore} />;
     case "system":
+    case "custom":
+      return null;
+    case "compactionSummary": {
+      // The compaction boundary: everything above was summarized into this.
+      const summary = message as CompactionSummaryMessage;
+      return (
+        <div class="compaction-divider narrow" title={summary.summary}>
+          上下文已压缩（原 {summary.tokensBefore} tokens） · 加载更早可查看压缩前消息
+        </div>
+      );
+    }
     case "branchSummary":
-    case "compactionSummary":
       return null;
     case "bashExecution": {
       const bash = message as BashExecutionMessage;
-      // The duplicate of a bash tool run's ToolCard is paired and hidden by
-      // MessagesArea; anything not paired (e.g. panel-run bash, which has no
-      // tool execution) renders here. Same card either way.
-      if (hideBash) return null;
+      // A bash tool run leaves both a ToolCard and this row; the caller drops
+      // the duplicate before rendering (duplicateBashRows). What is left is a
+      // panel-run bash, which has no tool execution. Same card either way.
       return (
         <div class="msg-assistant narrow">
           <BashCard run={bashRunFromMessage(bash)} behavior={{ kind: "stream" }} />

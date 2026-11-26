@@ -8,6 +8,14 @@ const CR = 13;
 export class FrameDecoder {
   private buf = "";
   private handler: FrameHandler;
+  /**
+   * Bytes are decoded incrementally: stdout chunks arrive on arbitrary pipe
+   * boundaries, so a multi-byte UTF-8 character is routinely split across two
+   * chunks. Decoding each chunk on its own turned those halves into U+FFFD
+   * (verified: "好" split in 3 → "你\uFFFD\uFFFD世界") — silent corruption that
+   * still parses as JSON.
+   */
+  private decoder = new TextDecoder("utf-8");
 
   constructor(handler: FrameHandler) {
     this.handler = handler;
@@ -15,7 +23,7 @@ export class FrameDecoder {
 
   /** Feed raw bytes (as they arrive from stdout); decodes incrementally. */
   push(chunk: Buffer): void {
-    this.buf += chunk.toString("utf8");
+    this.buf += this.decoder.decode(chunk, { stream: true });
     let i: number;
     while ((i = this.buf.indexOf("\n")) >= 0) {
       let line = this.buf.slice(0, i);
@@ -31,6 +39,7 @@ export class FrameDecoder {
 
   /** Flush a trailing line without LF (should not happen with a well-behaved pi). */
   end(): void {
+    this.buf += this.decoder.decode();
     if (this.buf.length > 0) {
       const line = this.buf;
       this.buf = "";
