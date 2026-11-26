@@ -28,6 +28,7 @@ import { duplicateBashRows, renderedRows } from "./stream-rows";
 import { groupActivities } from "./activity-groups";
 import { ActivityGroup } from "./activity-group";
 import { TurnFilesCard } from "./turn-files-card";
+import { ModelDeleteDialog, ModelEditor } from "./model-editor";
 import { getPiCwd } from "./pi-cwd";
 import { carriesPath, PATH_DRAG_TYPE } from "./path-drag";
 import {
@@ -43,7 +44,20 @@ import { ModelPicker } from "./model-picker";
 import { setPiCwd as reportPiCwd } from "./pi-cwd";
 import { initTheme, toggleTheme, watchSystemTheme, type Theme } from "./theme";
 import { DEFAULT_KEYBINDINGS, matchesKey } from "./keybindings";
-import type { AgentMessage, AssistantMessage, CommandInfo, ExtensionUiDialog, ExtensionUiResponse, Model, SessionEntryRecord, ToolResultMessage, UserMessage } from "./protocol";
+import type {
+  AgentMessage,
+  AssistantMessage,
+  CommandInfo,
+  ExtensionUiDialog,
+  ExtensionUiResponse,
+  Model,
+  ModelDraft,
+  ModelEntry,
+  ModelsConfigSnapshot,
+  SessionEntryRecord,
+  ToolResultMessage,
+  UserMessage,
+} from "./protocol";
 
 const store = new SessionStore();
 const tools = new ToolStore();
@@ -121,6 +135,12 @@ export function App(): JSX.Element {
   const [connState, setConnState] = useState<ConnState>("connecting");
   const [runPhase, setRunPhase] = useState<RunPhase>("idle");
   const [models, setModels] = useState<Model[]>([]);
+  // Models the user added in models.json (bridge snapshot), for the picker's
+  // edit/delete rows; null until the bridge answered.
+  const [customModels, setCustomModels] = useState<ModelsConfigSnapshot | null>(null);
+  /** Open add/edit form; null keeps it closed. */
+  const [modelEditor, setModelEditor] = useState<{ entry: ModelEntry | null } | null>(null);
+  const [modelToDelete, setModelToDelete] = useState<ModelEntry | null>(null);
   const [thinkingLevels, setThinkingLevels] = useState<ThinkingLevels>(null);
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [toasts, setToasts] = useState<{ id: number; text: string; err: boolean }[]>([]);
@@ -203,6 +223,53 @@ export function App(): JSX.Element {
         });
       }
     }
+  };
+
+  /** Models the user added in models.json, for the picker's edit/delete rows. */
+  const loadModelsConfig = async (): Promise<void> => {
+    const res = await conn.command({ type: "bridge_models_config" });
+    if (res.success) setCustomModels(res.data as ModelsConfigSnapshot);
+  };
+
+  /**
+   * Pi reads models.json only at startup, so a saved model shows up after the
+   * bridge restarts it. Commands fail while the new process boots; retry
+   * instead of reporting "not running" during that window.
+   */
+  const reloadModels = async (): Promise<boolean> => {
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const res = await conn.command({ type: "get_available_models" });
+      if (res.success) {
+        setModels((res.data as { models: Model[] }).models);
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return false;
+  };
+
+  const saveModelDraft = async (draft: ModelDraft): Promise<string | null> => {
+    const res = await conn.command({ type: "bridge_save_model", draft });
+    if (!res.success) return res.error ?? "保存失败";
+    setModelEditor(null);
+    pushToast("已保存模型");
+    void loadModelsConfig();
+    void reloadModels().then((ok) => {
+      if (!ok) pushToast("重启后未能读取模型列表，请稍后刷新页面", true);
+    });
+    return null;
+  };
+
+  const deleteCustomModel = async (entry: ModelEntry): Promise<void> => {
+    setModelToDelete(null);
+    const res = await conn.command({ type: "bridge_delete_model", provider: entry.provider, modelId: entry.id });
+    if (!res.success) {
+      pushToast(res.error ?? "删除失败", true);
+      return;
+    }
+    pushToast("已删除模型");
+    void loadModelsConfig();
+    void reloadModels();
   };
 
   // Full rehydration after session switch / fork / reconnect (F-01 again).
@@ -450,15 +517,17 @@ export function App(): JSX.Element {
         check();
       });
       try {
-        const [modelsRes, levelsRes, commandsRes] = await Promise.all([
+        const [modelsRes, levelsRes, commandsRes, customRes] = await Promise.all([
           conn.command({ type: "get_available_models" }),
           conn.command({ type: "get_available_thinking_levels" }),
           conn.command({ type: "get_commands" }),
+          conn.command({ type: "bridge_models_config" }),
         ]);
         if (modelsRes.success) {
           const { models: list } = modelsRes.data as { models: Model[] };
           setModels(list);
         }
+        if (customRes.success) setCustomModels(customRes.data as ModelsConfigSnapshot);
         if (levelsRes.success) {
           setThinkingLevels(levelsRes.data as { levels: string[] });
         }
@@ -491,7 +560,7 @@ export function App(): JSX.Element {
   // Esc aborts a run (M4 keybinding), unless a modal is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (dialog) return;
+      if (dialog || modelEditor !== null || modelToDelete !== null) return;
       if (runningRef.current && !readOnlyRef.current && matchesKey(e, DEFAULT_KEYBINDINGS.abort)) {
         e.preventDefault();
         setRunPhase("stopping");
@@ -500,7 +569,7 @@ export function App(): JSX.Element {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dialog]);
+  }, [dialog, modelEditor, modelToDelete]);
   const runningRef = useRef(false);
   runningRef.current = runPhase !== "idle";
   const readOnlyRef = useRef(false);
@@ -654,6 +723,7 @@ export function App(): JSX.Element {
         theme={theme}
         model={state.model}
         models={models}
+        customEntries={customModels?.entries ?? []}
         thinkingLevel={state.thinkingLevel}
         thinkingLevels={thinkingLevels?.levels ?? null}
         onSetModel={async (provider, modelId) => {
@@ -673,6 +743,9 @@ export function App(): JSX.Element {
           if (res.success) store.setState({ thinkingLevel: level });
           else pushToast(res.error ?? "切换推理档失败", true);
         }}
+        onAddModel={() => setModelEditor({ entry: null })}
+        onEditModel={(entry) => setModelEditor({ entry })}
+        onDeleteModel={(entry) => setModelToDelete(entry)}
         onStop={async () => {
           setRunPhase("stopping");
           await conn.command({ type: "abort" });
@@ -744,6 +817,24 @@ export function App(): JSX.Element {
         />
       ) : null}
       {dialog ? <ExtensionDialog key={dialog.id} dialog={dialog} onRespond={respondUi} /> : null}
+      {modelEditor === null ? null : (
+        <ModelEditor
+          snapshot={customModels}
+          entry={modelEditor.entry}
+          defaultProvider={state.model?.provider ?? null}
+          availableProviders={[...new Set(models.map((m) => m.provider))]}
+          running={running}
+          onCancel={() => setModelEditor(null)}
+          onSave={saveModelDraft}
+        />
+      )}
+      {modelToDelete === null ? null : (
+        <ModelDeleteDialog
+          entry={modelToDelete}
+          onCancel={() => setModelToDelete(null)}
+          onConfirm={() => void deleteCustomModel(modelToDelete)}
+        />
+      )}
       <div class="toast-stack">
         {toasts.map((t) => (
           <div key={t.id} class={`toast${t.err ? " err" : ""}`}>
@@ -1113,10 +1204,15 @@ function Composer(props: {
   theme: Theme;
   model: { id: string; name: string; provider: string } | null;
   models: Model[];
+  /** Models added in models.json; each row offers edit and delete. */
+  customEntries: ModelEntry[];
   thinkingLevel: string | null;
   thinkingLevels: string[] | null;
   onSetModel: (provider: string, modelId: string) => void;
   onSetThinking: (level: string) => void;
+  onAddModel: () => void;
+  onEditModel: (entry: ModelEntry) => void;
+  onDeleteModel: (entry: ModelEntry) => void;
   onSendWithMode: (mode: DeliveryMode, text: string, images: { data: string; mimeType: string }[]) => void;
   onStop: () => void;
 }): JSX.Element {
@@ -1357,10 +1453,14 @@ function Composer(props: {
           <ModelPicker
             model={props.model}
             models={props.models}
+            customEntries={props.customEntries}
             thinkingLevel={props.thinkingLevel}
             thinkingLevels={props.thinkingLevels}
             onSetModel={props.onSetModel}
             onSetThinking={props.onSetThinking}
+            onAddModel={props.onAddModel}
+            onEditModel={props.onEditModel}
+            onDeleteModel={props.onDeleteModel}
           />
           {props.running ? (
             <button class="composer-stop" title="停止当前回合" aria-label="停止" onClick={() => props.onStop()}>

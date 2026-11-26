@@ -290,8 +290,19 @@ body {
 .mp-item {
   display: flex;
   align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  border-radius: 6px;
+}
+.mp-item:hover {
+  background: var(--c-bg-subtle);
+}
+.mp-item-main {
+  display: flex;
+  align-items: center;
   gap: var(--sp-2);
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   background: none;
   border: none;
   font: inherit;
@@ -302,12 +313,49 @@ body {
   border-radius: 6px;
   cursor: pointer;
 }
-.mp-item:hover {
-  background: var(--c-bg-subtle);
-}
-.mp-item.active {
+.mp-item.active .mp-item-main {
   color: var(--c-fg);
   font-weight: 600;
+}
+.mp-item.unavailable .mp-item-main {
+  color: var(--c-fg-tertiary);
+  cursor: default;
+}
+.mp-item-actions {
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.mp-item:hover .mp-item-actions,
+.mp-item:focus-within .mp-item-actions {
+  opacity: 1;
+}
+/* Touch has no hover: the actions must stay reachable. */
+@media (hover: none) {
+  .mp-item-actions {
+    opacity: 1;
+  }
+}
+.mp-act {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--c-fg-tertiary);
+  cursor: pointer;
+}
+.mp-act:hover {
+  background: color-mix(in srgb, var(--c-fg) 8%, transparent);
+  color: var(--c-fg);
+}
+.mp-act.danger:hover {
+  color: var(--c-error);
 }
 .mp-item-name {
   flex: 1;
@@ -338,6 +386,27 @@ body {
   color: var(--c-fg);
   background: var(--c-bg-inset);
   border-color: var(--c-border-strong);
+}
+.mp-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 8px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--c-border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--c-fg-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.mp-add:hover {
+  color: var(--c-fg);
+  background: var(--c-bg-subtle);
 }
 
 .conn-badge {
@@ -1671,6 +1740,94 @@ body {
   margin-top: 10px;
   font-size: 11px;
   color: var(--c-fg-tertiary);
+}
+
+/* 添加 / 编辑模型表单（模型选择弹窗内的模态） */
+.model-modal {
+  width: min(560px, 92vw);
+}
+.model-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+.model-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.model-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--c-fg-secondary);
+}
+.model-field > span {
+  font-size: 11px;
+  color: var(--c-fg-tertiary);
+}
+.model-key-row {
+  display: flex;
+  gap: 6px;
+}
+.model-key-mode {
+  flex: none;
+  width: 152px;
+}
+.model-key-row .modal-input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+.model-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.model-checks {
+  display: flex;
+  gap: 16px;
+  padding: 2px 0 8px;
+  font-size: 13px;
+  color: var(--c-fg);
+}
+.model-checks label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.model-advanced {
+  border-top: 1px solid var(--c-border);
+  padding-top: 8px;
+}
+.model-advanced > summary {
+  cursor: pointer;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--c-fg-secondary);
+}
+.model-advanced[open] > summary {
+  margin-bottom: 10px;
+}
+.model-levels {
+  padding: 0;
+}
+.model-hint {
+  font-size: 11px;
+  color: var(--c-fg-tertiary);
+}
+.model-error {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--c-error) 10%, transparent);
+  color: var(--c-error);
+  font-size: 12px;
+}
+.model-modal .modal-input:disabled {
+  opacity: 0.5;
 }
 
 .status-chips {

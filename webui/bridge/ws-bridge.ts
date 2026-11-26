@@ -8,6 +8,7 @@ import type { ProtocolRecord } from "./pi-process.ts";
 import { deleteToRecycleBin, type SessionGroup } from "./sessions.ts";
 import { listPins, removePin, togglePin } from "./pins.ts";
 import { pickDirectory } from "./pick-dir.ts";
+import { deleteModel, parseDraft, readModelsConfig, saveModel } from "./models.ts";
 
 export type LifecycleType = "pi_started" | "pi_exited" | "pi_error";
 
@@ -219,6 +220,39 @@ export function wireClient(ws: WebSocket, ctx: ClientContext): void {
       case "bridge_restart_pi": {
         ctx.restartPi();
         reply({ command: "bridge_restart_pi", id: record.id, success: true });
+        return;
+      }
+      case "bridge_models_config": {
+        // The models the user added (models.json), for the picker's edit and
+        // delete affordances. Pi does not report which models came from there.
+        replyFrom("bridge_models_config", record.id, () => readModelsConfig());
+        return;
+      }
+      case "bridge_save_model": {
+        // Pi only rereads models.json on startup, so saving restarts the
+        // attached runtime; the client polls get_available_models afterwards.
+        replyFrom("bridge_save_model", record.id, async () => {
+          const saved = await saveModel(parseDraft(record.draft));
+          ctx.restartPi();
+          return saved;
+        });
+        return;
+      }
+      case "bridge_delete_model": {
+        // Trust boundary: browser input; both ids are plain strings that only
+        // address a models.json entry. `modelId` is named apart from `id`, the
+        // command's correlation id.
+        const provider = typeof record.provider === "string" ? record.provider : "";
+        const modelId = typeof record.modelId === "string" ? record.modelId : "";
+        if (!provider || !modelId) {
+          reply({ command: "bridge_delete_model", id: record.id, success: false, error: "provider 和模型 ID 不能为空" });
+          return;
+        }
+        replyFrom("bridge_delete_model", record.id, async () => {
+          const deleted = await deleteModel(provider, modelId);
+          if (deleted.removed) ctx.restartPi();
+          return deleted;
+        });
         return;
       }
       case "export_html": {

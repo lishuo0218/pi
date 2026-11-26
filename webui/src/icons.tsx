@@ -235,6 +235,15 @@ export function IconSearch({ size = 13 }: IconProps): JSX.Element {
   );
 }
 
+/** Add: a plus sign, for the model picker's add row. */
+export function IconPlus({ size = 13 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <path d="M12 5v14M5 12h14" />
+    </Svg>
+  );
+}
+
 /** Composer send: an upward arrow. */
 export function IconArrowUp({ size = 16 }: IconProps): JSX.Element {
   return (

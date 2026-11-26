@@ -136,6 +136,68 @@ export interface Model {
   maxTokens: number;
 }
 
+// --- Models the user added (bridge models.json snapshot, bridge/models.ts) ---
+
+/** API types the add-model form offers; models.json accepts any API pi knows. */
+export const MODEL_APIS = [
+  "openai-completions",
+  "openai-responses",
+  "anthropic-messages",
+  "google-generative-ai",
+] as const;
+
+/** Levels a thinkingLevelMap can map; each maps to its own value. */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+/** One `providers.<provider>.models` entry from models.json. */
+export type ModelEntry = {
+  provider: string;
+  id: string;
+  name: string | null;
+  reasoning: boolean;
+  input: string[];
+  contextWindow: number | null;
+  maxTokens: number | null;
+  /** Levels the entry maps; [] when it sets no thinkingLevelMap. */
+  thinkingLevels: string[];
+};
+
+/** Provider-level connection shared by that provider's models. */
+export type ModelProvider = {
+  id: string;
+  name: string | null;
+  baseUrl: string | null;
+  api: string | null;
+  apiKey: string | null;
+};
+
+export type ModelsConfigSnapshot = {
+  path: string;
+  exists: boolean;
+  providers: ModelProvider[];
+  entries: ModelEntry[];
+};
+
+/** One model as the add/edit form submits it. */
+export type ModelDraft = {
+  original: { provider: string; id: string } | null;
+  provider: string;
+  id: string;
+  name: string;
+  providerName: string;
+  baseUrl: string;
+  api: string;
+  /** "none" leaves the provider's saved key untouched. */
+  apiKeyMode: "none" | "env" | "literal";
+  /** Environment variable name for "env", the key itself for "literal". */
+  apiKey: string;
+  reasoning: boolean;
+  inputImage: boolean;
+  contextWindow: number | null;
+  maxTokens: number | null;
+  thinkingLevels: string[];
+};
+
 // --- Events (json.md) ---
 
 export type AssistantMessageEvent =
