@@ -188,6 +188,55 @@ export function IconGit({ size = 14 }: IconProps): JSX.Element {
   );
 }
 
+/** Changed-file row: stage this side into the index. */
+export function IconStage({ size = 13 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <path d="M12 5v14M5 12h14" />
+    </Svg>
+  );
+}
+
+/** Changed-file row: take this side back out of the index. */
+export function IconUnstage({ size = 13 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <path d="M5 12h14" />
+    </Svg>
+  );
+}
+
+/** Changed-file row: throw this side's change away. */
+export function IconDiscard({ size = 13 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+    </Svg>
+  );
+}
+
+/** Changed-file row: delete an untracked file. */
+export function IconTrash({ size = 13 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <path d="M4 7h16" />
+      <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />
+      <path d="M10 11v6M14 11v6" />
+    </Svg>
+  );
+}
+
+/** Conflict row: mark the file resolved. */
+export function IconCheck({ size = 13 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <path d="m4 12 5 5L20 6" />
+    </Svg>
+  );
+}
+
 /** Thinking block summary: two-lobed brain glyph (filled, 1024 viewBox from the source asset). */
 export function IconThinking({ size = 14 }: IconProps): JSX.Element {
   return (

@@ -3160,7 +3160,7 @@ body {
   background: color-mix(in srgb, var(--c-error) 12%, transparent);
 }
 
-/* 分组（冲突 / 已暂存 / 改动 / 未跟踪）与文件行 */
+/* 分组（冲突 / 已暂存 / 更改）与文件行 */
 .gv-caret {
   flex: none;
   width: 8px;
@@ -3212,10 +3212,14 @@ body {
 .gv-group-actions {
   flex: none;
   display: flex;
-  gap: 1px;
+  gap: 0;
+}
+.gv-group-actions .gv-icon-btn {
+  width: 18px;
+  height: 18px;
 }
 
-/* 分组之间留 2px，冲突 / 已暂存 / 改动 / 未跟踪 才不至于连成一片 */
+/* 分组之间留 2px，冲突 / 已暂存 / 更改 才不至于连成一片 */
 .gv-changes {
   display: flex;
   flex-direction: column;
@@ -3226,16 +3230,20 @@ body {
   min-width: 0;
 }
 
-/* 文件行：标记 + 路径 + 增删数 + 行内操作 */
+/* 文件行：标记 + 路径 + 该侧增删数 + 行内图标操作 */
 .gv-file {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 22px;
+  gap: 6px;
+  height: 23px;
   padding: 0 var(--sp-1) 0 9px;
   border-left: 2px solid transparent;
   cursor: pointer;
   outline: none;
+}
+/* 冲突行没有可打开的 diff（git 给不出单独的合并补丁），只留操作 */
+.gv-file.static {
+  cursor: default;
 }
 .gv-file:hover {
   background: var(--c-bg-inset);
@@ -3270,6 +3278,10 @@ body {
 .gv-dir {
   color: var(--c-fg-tertiary);
 }
+/* 重命名行在路径前标出原文件名，光标悬停仍显示完整 old → new */
+.gv-renamed {
+  color: var(--c-fg-tertiary);
+}
 .gv-stats {
   flex: none;
   display: flex;
@@ -3283,39 +3295,59 @@ body {
 .gv-del-count {
   color: var(--c-error);
 }
-/* 行内操作始终在位，平时压到 tertiary，悬停该行才提到 secondary */
+/* 行内操作平时隐藏，悬停、键盘进入或该行已选中时才出现，避免整列发花 */
 .gv-row-actions {
   flex: none;
   display: flex;
-  gap: 1px;
+  gap: 0;
+  opacity: 0;
+  pointer-events: none;
 }
-.gv-row-actions .gv-mini {
-  padding: 3px 5px;
-  color: var(--c-fg-tertiary);
+.gv-file:hover .gv-row-actions,
+.gv-file:focus-within .gv-row-actions,
+.gv-file.active .gv-row-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
-.gv-file:hover .gv-row-actions .gv-mini,
-.gv-file:focus-visible .gv-row-actions .gv-mini {
+.gv-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
   color: var(--c-fg-secondary);
+  cursor: pointer;
+}
+.gv-icon-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--c-fg) 12%, transparent);
+  color: var(--c-fg);
+}
+.gv-icon-btn.danger:hover:not(:disabled) {
+  color: var(--c-error);
+  background: color-mix(in srgb, var(--c-error) 14%, transparent);
+}
+.gv-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
-/* 提交框 */
+/* 提交框：输入框随文字长高，操作行全在底下一排，提交靠右下 */
 .gv-commit-box {
   flex: none;
   padding: var(--sp-2);
   border-bottom: 1px solid var(--c-border);
 }
-/* 提交框顶部工具行：AI 生成按钮靠右，不占输入框的行 */
-.gv-commit-head {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 4px;
-}
 .gv-commit-input {
   display: block;
   width: 100%;
-  min-height: 54px;
+  min-height: 58px;
   max-height: 40vh;
-  resize: vertical;
+  overflow-y: auto;
+  resize: none;
   font: inherit;
   font-size: 12px;
   line-height: 1.5;
@@ -3351,7 +3383,7 @@ body {
   accent-color: var(--c-fg);
 }
 .gv-commit-hint {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   font-size: 10.5px;
   color: var(--c-fg-tertiary);
@@ -3473,7 +3505,7 @@ body {
   color: var(--c-fg);
 }
 /* 历史栏：每行 40px，两行文本。上行标题 + refs 徽标，下行短 sha + 作者/时间，
-   悬停时作者/时间让位给复制按钮；左侧是 10px 宽的泳道图。选中态与文件行一致
+   悬停时作者/时间让位给复制按钮；左侧是泳道图（每列 10px，最少 3 列、最多 8 列）。选中态与文件行一致
    （2px 竖条 + 8% 底色）。窄栏里 sha 是最能认的锚点，用等宽字保留 */
 .gv-log {
   display: flex;

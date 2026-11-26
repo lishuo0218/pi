@@ -22,6 +22,15 @@ function freeLane(lanes: (string | null)[]): number {
   return free === -1 ? lanes.length : free;
 }
 
+/** Columns the rows use, from the node's lane down to the farthest parent edge. */
+export function laneSpan(rows: LaneRow[]): number {
+  let span = 0;
+  for (const row of rows) {
+    for (const lane of [row.lane, ...row.channels, ...row.edges]) span = Math.max(span, lane + 1);
+  }
+  return span;
+}
+
 /** Lay out `commits` (newest first) into graph rows. */
 export function layoutLanes(commits: GitCommit[]): LaneRow[] {
   let awaiting: (string | null)[] = [];

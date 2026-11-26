@@ -30,6 +30,9 @@ export type GitOperation =
   | { kind: "revert"; remaining: number | null }
   | { kind: "bisect" };
 
+/** Line counts of one side of a changed file; a null count means binary. */
+export type GitLineStats = { add: number | null; del: number | null };
+
 export type GitFile = {
   path: string;
   /** Source path of a rename/copy, else null. */
@@ -41,13 +44,14 @@ export type GitFile = {
   untracked: boolean;
   /** Unmerged code, or null when the path merged cleanly. */
   conflict: GitConflictKind | null;
+  /** Staged patch counts, or null when the index holds no change for it. */
+  indexStats: GitLineStats | null;
   /**
-   * numstat line counts for the side the row shows: the worktree diff when the
-   * worktree changed, else the staged diff. null for binary and untracked
-   * paths, and ambiguous (worktree numbers) when both sides changed.
+   * Worktree patch counts, or null when the worktree matches the index. Git
+   * reports none for untracked paths (they exist in no diff), so those rows
+   * carry null even though the worktree side is what a click opens.
    */
-  add: number | null;
-  del: number | null;
+  worktreeStats: GitLineStats | null;
 };
 
 export type GitStatus = {

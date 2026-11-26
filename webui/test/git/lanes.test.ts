@@ -2,15 +2,10 @@
 // the shapes the repository fixtures would need many commits to produce.
 import { describe, expect, it } from "vitest";
 import type { GitCommit } from "../../bridge/git/types.ts";
-import { layoutLanes, type LaneRow } from "../../src/git/lanes.ts";
+import { laneSpan, layoutLanes } from "../../src/git/lanes.ts";
 
 function commit(sha: string, parents: string[]): GitCommit {
   return { sha, short: sha.slice(0, 7), author: "Test", date: "2026-01-01 00:00", subject: sha, parents, refs: [] };
-}
-
-/** Columns the rows actually draw, which is what the component's cap clamps. */
-function span(rows: LaneRow[]): number {
-  return Math.max(...rows.flatMap((row) => [row.lane, ...row.channels, ...row.edges])) + 1;
 }
 
 describe("layoutLanes", () => {
@@ -29,7 +24,7 @@ describe("layoutLanes", () => {
     expect(rows[1]).toMatchObject({ lane: 1, incoming: true, channels: [0], edges: [0] });
     // Both parents converge on lane 0; the second lane is gone above this row.
     expect(rows[2]).toMatchObject({ lane: 0, channels: [], edges: [] });
-    expect(span(rows)).toBe(2);
+    expect(laneSpan(rows)).toBe(2);
   });
 
   it("branches an octopus merge into one lane per parent", () => {
@@ -54,7 +49,7 @@ describe("layoutLanes", () => {
   it("keeps two lanes when a branch continues past the loaded window", () => {
     const rows = layoutLanes([commit("m", ["p", "s"]), commit("s", ["p"])]);
     expect(rows[1]).toMatchObject({ lane: 1, channels: [0] });
-    expect(span(rows)).toBe(2);
+    expect(laneSpan(rows)).toBe(2);
   });
 
   it("puts a parent two branches share on the lane it already waits on", () => {
@@ -69,7 +64,7 @@ describe("layoutLanes", () => {
     // z has no lane of its own to give p, so p stays on lane 0 and q takes the row.
     expect(rows[2]).toMatchObject({ lane: 1, channels: [0], edges: [0, 1] });
     expect(rows[4]).toMatchObject({ lane: 0, channels: [], edges: [] });
-    expect(span(rows)).toBe(2);
+    expect(laneSpan(rows)).toBe(2);
     expect(rows.every((row) => new Set(row.edges).size === row.edges.length)).toBe(true);
   });
 
@@ -91,7 +86,7 @@ describe("layoutLanes", () => {
     const rows = layoutLanes([commit("f1", ["g1"]), commit("f2", ["g2"]), commit("f3", ["g3"])]);
     expect(rows.map((row) => row.lane)).toEqual([0, 1, 2]);
     expect(rows[2]?.channels).toEqual([0, 1]);
-    expect(span(rows)).toBe(3);
+    expect(laneSpan(rows)).toBe(3);
   });
 
   it("marks a child whose parent already rendered above as a new lane", () => {
@@ -103,6 +98,9 @@ describe("layoutLanes", () => {
 
   it("leaves the rows already rendered unchanged when a page is appended", () => {
     const commits = [commit("m", ["p", "s"]), commit("s", ["p"]), commit("p", [])];
-    expect(layoutLanes(commits).slice(0, 2)).toEqual(layoutLanes(commits.slice(0, 2)));
+    const head = layoutLanes(commits.slice(0, 2));
+    expect(layoutLanes(commits).slice(0, 2)).toEqual(head);
+    // The component sizes the column from the window, so appending may only widen.
+    expect(laneSpan(layoutLanes(commits))).toBeGreaterThanOrEqual(laneSpan(head));
   });
 });

@@ -9,6 +9,7 @@ import type {
   GitConflictKind,
   GitErrorCode,
   GitFile,
+  GitLineStats,
   GitOperation,
   GitRef,
   GitRefNames,
@@ -69,17 +70,27 @@ function parseOperation(value: unknown): GitOperation | null | undefined {
   }
 }
 
+function parseLineStats(value: unknown): GitLineStats | null | undefined {
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
+  const { add, del } = value;
+  if (add !== null && typeof add !== "number") return undefined;
+  if (del !== null && typeof del !== "number") return undefined;
+  return { add, del };
+}
+
 function parseFile(value: unknown): GitFile | null {
   if (!isRecord(value)) return null;
-  const { path, origPath, index, worktree, untracked, add, del } = value;
+  const { path, origPath, index, worktree, untracked } = value;
   if (typeof path !== "string" || typeof index !== "string" || typeof worktree !== "string") return null;
   if (typeof untracked !== "boolean") return null;
   if (origPath !== null && typeof origPath !== "string") return null;
-  if (add !== null && typeof add !== "number") return null;
-  if (del !== null && typeof del !== "number") return null;
+  const indexStats = parseLineStats(value.indexStats);
+  const worktreeStats = parseLineStats(value.worktreeStats);
+  if (indexStats === undefined || worktreeStats === undefined) return null;
   const conflict = parseConflict(value.conflict);
   if (conflict === undefined) return null;
-  return { path, origPath, index, worktree, untracked, conflict, add, del };
+  return { path, origPath, index, worktree, untracked, conflict, indexStats, worktreeStats };
 }
 
 function parseStatus(value: unknown): GitStatus | null {

@@ -5,9 +5,7 @@
 import { errorCode, errorText, runGit, succeeded } from "./exec.ts";
 import type { Repo } from "./repo.ts";
 import { operationOf } from "./repo.ts";
-import type { GitConflictKind, GitFile, GitResult, GitStatus } from "./types.ts";
-
-type Stat = { add: number | null; del: number | null };
+import type { GitConflictKind, GitFile, GitLineStats, GitResult, GitStatus } from "./types.ts";
 
 /** Porcelain v2 `u` codes: `DD`, `AU`, `UD`, `UA`, `DU`, `AA`, `UU`. */
 function conflictOf(code: string): GitConflictKind | null {
@@ -32,8 +30,8 @@ function conflictOf(code: string): GitConflictKind | null {
 }
 
 /** Parse `--numstat -z`: `add\tdel\tpath`, and for renames `add\tdel\t` then old, new. */
-export function parseNumstat(text: string): Map<string, Stat> {
-  const stats = new Map<string, Stat>();
+export function parseNumstat(text: string): Map<string, GitLineStats> {
+  const stats = new Map<string, GitLineStats>();
   const records = text.split("\0");
   for (let index = 0; index < records.length; index++) {
     const record = records[index] ?? "";
@@ -43,7 +41,7 @@ export function parseNumstat(text: string): Map<string, Stat> {
     if (first < 0 || second < 0) continue;
     const add = record.slice(0, first);
     const del = record.slice(first + 1, second);
-    const stat: Stat = {
+    const stat: GitLineStats = {
       add: add === "-" ? null : Number(add),
       del: del === "-" ? null : Number(del),
     };
@@ -61,15 +59,15 @@ export function parseNumstat(text: string): Map<string, Stat> {
   return stats;
 }
 
-function statFor(stats: Map<string, Stat>, path: string): Stat {
-  return stats.get(path) ?? { add: null, del: null };
+function statFor(stats: Map<string, GitLineStats>, path: string): GitLineStats | null {
+  return stats.get(path) ?? null;
 }
 
 /** Parse `status --porcelain=v2 --branch -z`. */
 export function parseStatus(
   text: string,
-  stagedStats: Map<string, Stat>,
-  unstagedStats: Map<string, Stat>,
+  stagedStats: Map<string, GitLineStats>,
+  unstagedStats: Map<string, GitLineStats>,
   root: string,
 ): Omit<GitStatus, "operation"> {
   let branch: string | null = null;
@@ -115,8 +113,6 @@ export function parseStatus(
       const worktreeStatus = xy[1] ?? ".";
       const path = parts.slice(kind === "1" ? 8 : 10).join(" ");
       if (path === "") continue;
-      const stat =
-        worktreeStatus !== "." ? statFor(unstagedStats, path) : statFor(stagedStats, path);
       files.push({
         path,
         origPath: null,
@@ -124,8 +120,8 @@ export function parseStatus(
         worktree: worktreeStatus,
         untracked: false,
         conflict: kind === "u" ? conflictOf(xy) : null,
-        add: stat.add,
-        del: stat.del,
+        indexStats: statFor(stagedStats, path),
+        worktreeStats: statFor(unstagedStats, path),
       });
       continue;
     }
@@ -140,8 +136,6 @@ export function parseStatus(
       const origPath = records[index + 1] ?? null;
       index += 1;
       if (path === "") continue;
-      const stat =
-        worktreeStatus !== "." ? statFor(unstagedStats, path) : statFor(stagedStats, path);
       files.push({
         path,
         origPath: origPath === "" ? null : origPath,
@@ -149,8 +143,8 @@ export function parseStatus(
         worktree: worktreeStatus,
         untracked: false,
         conflict: null,
-        add: stat.add,
-        del: stat.del,
+        indexStats: statFor(stagedStats, path),
+        worktreeStats: statFor(unstagedStats, path),
       });
       continue;
     }
@@ -164,8 +158,8 @@ export function parseStatus(
         worktree: "?",
         untracked: true,
         conflict: null,
-        add: null,
-        del: null,
+        indexStats: null,
+        worktreeStats: null,
       });
     }
   }

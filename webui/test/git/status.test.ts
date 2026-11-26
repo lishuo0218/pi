@@ -36,11 +36,11 @@ describe("status", () => {
 
   it("splits a partially staged file into one index side and one worktree side", async () => {
     const dir = await repo();
-    await write(dir, "a.txt", "one\ntwo\nthree\n");
+    await write(dir, "a.txt", "one\ntwo\nthree\nfour\n");
     await commitAll(dir, "base");
-    await write(dir, "a.txt", "one\nstaged\nthree\n");
+    await write(dir, "a.txt", "one\nstaged\nthree\nfour\n");
     await git(dir, ["add", "a.txt"]);
-    await write(dir, "a.txt", "one\nstaged\nworktree\n");
+    await write(dir, "a.txt", "one\nstaged\nworktree\nfour\nfive\n");
 
     const status = statusOf(await call(dir, { action: "status" }));
     const file = status.files.find((entry) => entry.path === "a.txt");
@@ -49,6 +49,10 @@ describe("status", () => {
     expect(file?.worktree).toBe("M");
     expect(file?.untracked).toBe(false);
     expect(file?.conflict).toBeNull();
+    // Each side counts only its own patch: the index against HEAD, the worktree
+    // against the index.
+    expect(file?.indexStats).toEqual({ add: 1, del: 1 });
+    expect(file?.worktreeStats).toEqual({ add: 2, del: 1 });
   });
 
   it("marks untracked files and counts worktree line changes", async () => {
@@ -61,12 +65,15 @@ describe("status", () => {
     const status = statusOf(await call(dir, { action: "status" }));
     const changed = status.files.find((entry) => entry.path === "a.txt");
     const fresh = status.files.find((entry) => entry.path === "fresh.txt");
-    expect([changed?.add, changed?.del]).toEqual([1, 1]);
+    expect(changed?.indexStats).toBeNull();
+    expect(changed?.worktreeStats).toEqual({ add: 1, del: 1 });
     expect(fresh?.untracked).toBe(true);
-    expect(fresh?.add).toBeNull();
+    // Untracked paths are in no diff, so git reports no counts for them.
+    expect(fresh?.indexStats).toBeNull();
+    expect(fresh?.worktreeStats).toBeNull();
   });
 
-  it("reports a staged rename with its original path", async () => {
+  it("reports a staged rename with its original path and zero line counts", async () => {
     const dir = await repo();
     await write(dir, "old.txt", "content\n");
     await commitAll(dir, "base");
@@ -76,6 +83,20 @@ describe("status", () => {
     const file = status.files.find((entry) => entry.path === "new.txt");
     expect(file?.origPath).toBe("old.txt");
     expect(file?.index).toBe("R");
+    // The rename numstat record names the new path after two extra NUL fields.
+    expect(file?.indexStats).toEqual({ add: 0, del: 0 });
+  });
+
+  it("reports null counts for a binary patch", async () => {
+    const dir = await repo();
+    await write(dir, "blob.bin", "a\u0000b\n");
+    await commitAll(dir, "base");
+    await write(dir, "blob.bin", "c\u0000d\n");
+    await git(dir, ["add", "blob.bin"]);
+
+    const status = statusOf(await call(dir, { action: "status" }));
+    const file = status.files.find((entry) => entry.path === "blob.bin");
+    expect(file?.indexStats).toEqual({ add: null, del: null });
   });
 
   it("keeps path spacing and non-ASCII names verbatim", async () => {

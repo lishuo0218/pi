@@ -7,8 +7,8 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { JSX } from "preact";
 import type { GitCommit, GitRef } from "../../bridge/git/types";
 import { CopyButton } from "../copy-button";
-import { laneCell, ROW_HEIGHT } from "./lane-graph";
-import { layoutLanes, type LaneRow } from "./lanes";
+import { laneCell, reserveColumns, ROW_HEIGHT } from "./lane-graph";
+import { laneSpan, layoutLanes, type LaneRow } from "./lanes";
 import type { GitScope, GitStore } from "./store";
 
 /** Badges that fit before the rest collapse into `+n`. */
@@ -57,6 +57,9 @@ export function GitHistory({ store }: { store: GitStore }): JSX.Element {
   // the rows fall back to a plain node column.
   const searching = store.historyQuery !== "";
   const layout = useMemo(() => (searching ? null : layoutLanes(store.commits)), [store.commits, searching]);
+  // The window's own need, not a constant: a linear history keeps the gap to the
+  // subject small, and a walk only ever widens as pages land.
+  const columns = layout === null ? 1 : reserveColumns(laneSpan(layout));
   const activeSha =
     store.selection !== null && store.selection.kind === "commit" ? store.selection.commit.sha : null;
 
@@ -227,6 +230,7 @@ export function GitHistory({ store }: { store: GitStore }): JSX.Element {
                 key={commit.sha}
                 commit={commit}
                 row={layout === null ? null : (layout[index] ?? null)}
+                columns={columns}
                 active={commit.sha === activeSha}
                 store={store}
               />
@@ -250,8 +254,8 @@ function laneColor(lane: number): string {
  * Graph cell of one row. The shapes come from `laneCell`, so this stays a plain
  * assembly of the paths and the node in the lane's color.
  */
-function LaneGraph({ row, active }: { row: LaneRow | null; active: boolean }): JSX.Element {
-  const cell = laneCell(row);
+function LaneGraph({ row, columns, active }: { row: LaneRow | null; columns: number; active: boolean }): JSX.Element {
+  const cell = laneCell(row, columns);
   const lane = row === null ? 0 : row.lane;
   const viewBox = `0 0 ${cell.width} ${ROW_HEIGHT}`;
   return (
@@ -274,11 +278,13 @@ function LaneGraph({ row, active }: { row: LaneRow | null; active: boolean }): J
 function GitCommitRow({
   commit,
   row,
+  columns,
   active,
   store,
 }: {
   commit: GitCommit;
   row: LaneRow | null;
+  columns: number;
   active: boolean;
   store: GitStore;
 }): JSX.Element {
@@ -303,7 +309,7 @@ function GitCommitRow({
         open();
       }}
     >
-      <LaneGraph row={row} active={active} />
+      <LaneGraph row={row} columns={columns} active={active} />
       <span class="gv-commit-text">
         <span class="gv-commit-line">
           <span class="gv-commit-subject">{commit.subject}</span>
