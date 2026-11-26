@@ -59,7 +59,8 @@
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, "SFMono-Regular", monospace;
   /* 内容区宽度：随窗口宽度计算，94% 比例 + 1100px 上限（DESIGN.md §4 的 860px 已按用户决策放宽）；减去右侧 ToDo 侧栏宽度 */
   --todo-w: 0px;
-  --content-area: calc(100vw - var(--sidebar-w, 0px) - var(--todo-w, 0px));
+  --git-w: 0px;
+  --content-area: calc(100vw - var(--sidebar-w, 0px) - var(--git-w, 0px) - var(--todo-w, 0px));
   --content-max: min(1100px, calc(var(--content-area) * 0.94));
   color-scheme: light;
 }
@@ -218,7 +219,7 @@ body {
 .stream-scroll {
   position: absolute;
   inset: 56px 0 0 0;
-  left: var(--sidebar-w, 0px);
+  left: calc(var(--sidebar-w, 0px) + var(--git-w, 0px));
   right: var(--todo-w, 0px);
   bottom: var(--composer-space, 0px);
   overflow-y: auto;
@@ -446,7 +447,7 @@ body {
 /* === 输入框 === */
 .composer-wrap {
   position: absolute;
-  left: var(--sidebar-w, 0px);
+  left: calc(var(--sidebar-w, 0px) + var(--git-w, 0px));
   right: var(--todo-w, 0px);
   bottom: 0;
   padding: 0 0 24px;
@@ -593,7 +594,7 @@ body {
 /* === 队列条（F-16） === */
 .queue-bar {
   position: absolute;
-  left: var(--sidebar-w, 0px);
+  left: calc(var(--sidebar-w, 0px) + var(--git-w, 0px));
   right: var(--todo-w, 0px);
   bottom: calc(var(--composer-space, 140px) + 8px);
   display: flex;
@@ -1457,7 +1458,7 @@ body {
 
 .widget-area {
   position: absolute;
-  left: var(--sidebar-w, 0px);
+  left: calc(var(--sidebar-w, 0px) + var(--git-w, 0px));
   right: var(--todo-w, 0px);
   bottom: calc(var(--composer-space, 140px) + 40px);
   display: flex;
@@ -1483,7 +1484,7 @@ body {
 /* === 重试横幅 (F-26) === */
 .retry-banner {
   position: absolute;
-  left: calc(var(--sidebar-w, 0px) + (100vw - var(--sidebar-w, 0px) - var(--todo-w, 0px)) / 2);
+  left: calc(var(--sidebar-w, 0px) + var(--git-w, 0px) + var(--content-area) / 2);
   transform: translateX(-50%);
   bottom: calc(var(--composer-space, 140px) + 80px);
   display: flex;
@@ -2935,32 +2936,41 @@ body {
 .file-item:hover {
   background: var(--c-bg-subtle);
 }
-/* === Git 视图（全屏，F-29）=== */
+/* === Git 侧栏（F-29）=== */
 /* 尺寸基准：文件行 22px、diff 行 18px（与 diff-view.tsx 的 LINE_HEIGHT 一致）、
-   改动栏 340px、历史栏 360px。三栏用底色与 1px 分隔线分层；选中态统一为
+   侧栏宽度即 --git-w（打开时 380px），消息流按它让位；侧栏与 diff 覆盖层用底色与 1px 分隔线分层；选中态统一为
    2px 左侧竖条 + 底色；按钮只有一种：无边框文字按钮，悬停才出底色，
    危险操作悬停变红。 */
 .gv {
   position: fixed;
-  inset: 0;
+  left: var(--sidebar-w, 0px);
+  top: 56px;
+  bottom: 0;
+  width: var(--git-w, 0px);
   z-index: 60;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--c-bg);
   color: var(--c-fg);
+  border-right: 1px solid var(--c-border);
 }
 
-/* 顶栏 */
+/* 顶栏：分支与关闭一行，远程操作一行，窄栏里不挤成一条 */
 .gv-head {
   flex: none;
   display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  height: 44px;
-  padding: 0 var(--sp-3);
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: 6px var(--sp-2);
   background: var(--c-bg-subtle);
   border-bottom: 1px solid var(--c-border);
+}
+.gv-head-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
 }
 .gv-head-title {
   font-size: 12px;
@@ -2971,8 +2981,9 @@ body {
   flex: 1;
 }
 .gv-branch {
-  flex: none;
-  max-width: 46vw;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3060,32 +3071,30 @@ body {
   background: color-mix(in srgb, var(--c-warning) 12%, transparent);
 }
 
-/* 改动栏与历史栏：两栏共用底色与分隔线，各自滚动，都不带折叠标题行 */
+/* 改动栏与历史栏：上下排列共用底色，各自滚动，都不带折叠标题行；
+   改动栏最多占一半高度，历史吃掉剩下的，变更少时把空间让给历史 */
 .gv-body {
   flex: 1;
   min-height: 0;
   display: flex;
+  flex-direction: column;
 }
 .gv-side {
-  flex: none;
-  width: 340px;
-  display: flex;
-  flex-direction: column;
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: 55%;
   overflow-y: auto;
   background: var(--c-bg-subtle);
-  border-right: 1px solid var(--c-border);
+  border-bottom: 1px solid var(--c-border);
   padding-bottom: var(--sp-2);
 }
 .gv-history {
-  flex: none;
-  width: 360px;
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--c-bg-subtle);
-  border-right: 1px solid var(--c-border);
 }
 /* 筛选与搜索：两行常驻在列表之上，不随历史滚动 */
 .gv-history-head {
@@ -3144,12 +3153,47 @@ body {
 .gv-history-body:focus-visible {
   box-shadow: inset 0 0 0 1px var(--c-border-strong);
 }
+/* diff 覆盖层：贴在 Git 侧栏右边、遮住对话区；没有选中时整块不渲染 */
 .gv-main {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
+  position: fixed;
+  left: calc(var(--sidebar-w, 0px) + var(--git-w, 0px));
+  right: var(--todo-w, 0px);
+  top: 56px;
+  bottom: 0;
+  z-index: 60;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  background: var(--c-bg);
+  border-left: 1px solid var(--c-border);
+}
+/* 浮在 diff 工具条右上角的关闭按钮：头部的 ✕ 之外再给一个显眼的出口 */
+.gv-main-close {
+  position: absolute;
+  top: 36px;
+  right: 10px;
+  z-index: 3;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--c-fg-secondary);
+  background: color-mix(in srgb, var(--c-bg) 84%, transparent);
+  border: 1px solid var(--c-border);
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+}
+.gv-main-close:hover {
+  color: var(--c-fg);
+  background: var(--c-bg-inset);
+}
+.gv-main-close:focus-visible {
+  outline: 1px solid var(--c-border-strong);
 }
 .gv-main-head {
   flex: none;
@@ -3730,11 +3774,12 @@ body {
   font-size: 11px;
   color: var(--c-fg-tertiary);
 }
-/* diff 工具条沿用代码查看器的 .viewer-* 组件，只在这里对齐内距与悬停色 */
+/* diff 工具条沿用代码查看器的 .viewer-* 组件，只在这里对齐内距与悬停色；
+   右侧 44px 给浮动的关闭按钮让位 */
 .gv-diff .viewer-bar,
 .gv-diff .viewer-find {
   gap: 2px;
-  padding: 3px var(--sp-2);
+  padding: 3px 44px 3px var(--sp-2);
 }
 .gv-diff .viewer-btn {
   padding: 4px 7px;

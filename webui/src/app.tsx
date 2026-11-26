@@ -151,6 +151,12 @@ export function App(): JSX.Element {
     document.documentElement.style.setProperty("--sidebar-w", sidebarOpen ? "260px" : "0px");
   }, [sidebarOpen]);
 
+  // The Git panel is a column, not an overlay: the stream gives up its width so
+  // the conversation stays readable beside the commit box, files and history.
+  useLayoutEffect(() => {
+    document.documentElement.style.setProperty("--git-w", showGit ? "380px" : "0px");
+  }, [showGit]);
+
   // The right panel occupies a strip on the right edge: the ToDo and file tree
   // view at a fixed width, a file preview at its dragged width.
   const panelOpen = todoOpen || preview !== null;

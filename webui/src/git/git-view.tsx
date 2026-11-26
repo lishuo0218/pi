@@ -1,6 +1,7 @@
-// Full-screen Git view (F-29): branch header, a changed-file column, a history
-// column and a right pane that shows the selected patch or commit. Esc leaves
-// the view; destructive writes stop here for confirmation.
+// Git sidebar (F-29): a left column that takes its width from the message stream
+// and holds the commit box, the changed files and the history; the selected patch
+// or commit opens in a diff overlay to its right. Esc closes the overlay first,
+// then the panel; writes stop here for confirmation.
 import { useEffect, useMemo, useRef } from "preact/hooks";
 import { useSyncExternalStore } from "preact/compat";
 import type { JSX } from "preact";
@@ -71,6 +72,11 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {
       event.preventDefault();
       if (store.confirm !== null) {
         store.cancelConfirm();
+        return;
+      }
+      // The diff overlay is a layer of its own: Esc closes it before the panel.
+      if (store.selection !== null) {
+        store.clearSelection();
         return;
       }
       onClose();
@@ -145,152 +151,165 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {
     : null;
 
   return (
-    <main class="gv">
-      <header class="gv-head">
-        <span class="gv-head-title">Git</span>
-        {status === null ? null : (
-          <span class="gv-branch">
-            {status.detached ? "detached HEAD" : (status.branch ?? "（未命名分支）")}
-            {status.unborn ? "（无提交）" : ""}
-            {status.upstream === null ? "" : ` → ${status.upstream}`}
-            {status.ahead === 0 && status.behind === 0 ? "" : `  ↑${status.ahead} ↓${status.behind}`}
-          </span>
+    <>
+      <aside class="gv" aria-label="Git 面板">
+        <header class="gv-head">
+          <div class="gv-head-row">
+            <span class="gv-head-title">Git</span>
+            {status === null ? null : (
+              <span class="gv-branch">
+                {status.detached ? "detached HEAD" : (status.branch ?? "（未命名分支）")}
+                {status.unborn ? "（无提交）" : ""}
+                {status.upstream === null ? "" : ` → ${status.upstream}`}
+                {status.ahead === 0 && status.behind === 0 ? "" : `  ↑${status.ahead} ↓${status.behind}`}
+              </span>
+            )}
+            <span class="gv-head-spacer" />
+            <button class="gv-head-btn" title="关闭（Esc）" onClick={onClose}>
+              关闭
+            </button>
+          </div>
+          <div class="gv-head-row">
+            <button
+              class="gv-head-btn"
+              disabled={!canFetch}
+              title="获取远程更新（git fetch --prune）"
+              onClick={() => void store.fetchRemote()}
+            >
+              获取
+            </button>
+            <button
+              class="gv-head-btn"
+              disabled={!canPull}
+              title={trackingHint("拉取", status, canPull)}
+              onClick={() => void store.pull()}
+            >
+              拉取
+            </button>
+            <button
+              class="gv-head-btn gv-primary"
+              disabled={!canPush}
+              title={trackingHint("推送", status, canPush)}
+              onClick={() => {
+                if (branch !== null && upstream !== null) store.requestPush(branch, upstream);
+              }}
+            >
+              推送
+              {status === null || status.ahead === 0 ? "" : ` ${status.ahead}`}
+            </button>
+            <button class="gv-head-btn" title="刷新" onClick={() => void store.refreshStatus()}>
+              刷新
+            </button>
+          </div>
+        </header>
+
+        {store.notice === null ? null : (
+          <div class={`gv-notice${store.notice.level === "error" ? " err" : ""}`}>{store.notice.text}</div>
         )}
-        <span class="gv-head-spacer" />
-        <button
-          class="gv-head-btn"
-          disabled={!canFetch}
-          title="获取远程更新（git fetch --prune）"
-          onClick={() => void store.fetchRemote()}
-        >
-          获取
-        </button>
-        <button
-          class="gv-head-btn"
-          disabled={!canPull}
-          title={trackingHint("拉取", status, canPull)}
-          onClick={() => void store.pull()}
-        >
-          拉取
-        </button>
-        <button
-          class="gv-head-btn gv-primary"
-          disabled={!canPush}
-          title={trackingHint("推送", status, canPush)}
-          onClick={() => {
-            if (branch !== null && upstream !== null) store.requestPush(branch, upstream);
-          }}
-        >
-          推送
-          {status === null || status.ahead === 0 ? "" : ` ${status.ahead}`}
-        </button>
-        <button class="gv-head-btn" title="刷新" onClick={() => void store.refreshStatus()}>
-          刷新
-        </button>
-        <button class="gv-head-btn" title="关闭（Esc）" onClick={onClose}>
-          关闭
-        </button>
-      </header>
 
-      {store.notice === null ? null : (
-        <div class={`gv-notice${store.notice.level === "error" ? " err" : ""}`}>{store.notice.text}</div>
-      )}
+        {store.status.kind === "loading" ? (
+          <p class="gv-empty pad">读取仓库…</p>
+        ) : store.status.kind === "error" ? (
+          <div class="gv-setup">
+            <p class="gv-setup-text">{setupMessage(store.status.error, store.status.code)}</p>
+            <p class="gv-setup-detail">{store.status.error}</p>
+            <button class="gv-head-btn" onClick={() => void store.refreshStatus()}>
+              重试
+            </button>
+          </div>
+        ) : (
+          <div class="gv-body">
+            <div class="gv-side">
+              <GitCommitBox store={store} status={store.status.status} />
+              <GitChanges store={store} status={store.status.status} />
+            </div>
 
-      {store.status.kind === "loading" ? (
-        <p class="gv-empty pad">读取仓库…</p>
-      ) : store.status.kind === "error" ? (
-        <div class="gv-setup">
-          <p class="gv-setup-text">{setupMessage(store.status.error, store.status.code)}</p>
-          <p class="gv-setup-detail">{store.status.error}</p>
-          <button class="gv-head-btn" onClick={() => void store.refreshStatus()}>
-            重试
+            <GitHistory store={store} />
+          </div>
+        )}
+      </aside>
+
+      {selection === null ? null : (
+        <section class="gv-main" aria-label="diff 面板">
+          <button
+            class="gv-main-close"
+            title="关闭 diff（Esc）"
+            aria-label="关闭 diff"
+            onClick={() => store.clearSelection()}
+          >
+            ✕
           </button>
-        </div>
-      ) : (
-        <div class="gv-body">
-          <aside class="gv-side">
-            <GitCommitBox store={store} status={store.status.status} />
-            <GitChanges store={store} status={store.status.status} />
-          </aside>
-
-          <GitHistory store={store} />
-
-          <div class="gv-main">
-            {selection === null ? (
-              <p class="gv-empty pad">选择一个文件或一次提交查看 diff</p>
+          <div class="gv-main-head">
+            {selection.kind === "commit" ? (
+              <span class="gv-main-title">
+                <span class="gv-commit-sha">{selection.commit.short}</span>
+                <span class="gv-main-subject">{selection.commit.subject}</span>
+              </span>
             ) : (
               <>
-                <div class="gv-main-head">
-                  {selection.kind === "commit" ? (
-                    <span class="gv-main-title">
-                      <span class="gv-commit-sha">{selection.commit.short}</span>
-                      <span class="gv-main-subject">{selection.commit.subject}</span>
-                    </span>
-                  ) : (
-                    <>
-                      <span class="gv-main-title" title={selection.path}>
-                        {selection.path}
-                      </span>
-                      <span class="gv-chip">{openSide === "index" ? "已暂存" : "工作区"}</span>
-                      {openFile !== null && openFile.conflict !== null ? <span class="gv-chip warn">冲突</span> : null}
-                      <span class="gv-head-spacer" />
-                      {openFile === null || openFile.conflict !== null ? null : (
-                        <span class="gv-main-actions">
-                          {openSide === "worktree" ? (
-                            <button class="gv-mini" disabled={store.busy} onClick={() => void store.stage([selection.path])}>
-                              {openFile.untracked ? "跟踪文件" : "暂存文件"}
-                            </button>
-                          ) : (
-                            <button class="gv-mini" disabled={store.busy} onClick={() => void store.unstage([selection.path])}>
-                              取消暂存
-                            </button>
-                          )}
-                          <button
-                            class="gv-mini danger"
-                            disabled={store.busy}
-                            onClick={() => {
-                              const scope = openFile.untracked ? "untracked" : openSide === "index" ? "all" : "worktree";
-                              const verb = openFile.untracked ? "删除" : "丢弃";
-                              store.requestDiscard([selection.path], scope, `${verb} ${selection.path} 的改动？`);
-                            }}
-                          >
-                            {openFile.untracked ? "删除文件" : "丢弃改动"}
-                          </button>
-                        </span>
-                      )}
-                      <button
-                        class="gv-mini"
-                        title={store.context === "full" ? "只看改动前后的几行" : "载入完整上下文（可折叠）"}
-                        onClick={() => store.setContext(store.context === "full" ? "small" : "full")}
-                      >
-                        {store.context === "full" ? "3 行上下文" : "完整上下文"}
+                <span class="gv-main-title" title={selection.path}>
+                  {selection.path}
+                </span>
+                <span class="gv-chip">{openSide === "index" ? "已暂存" : "工作区"}</span>
+                {openFile !== null && openFile.conflict !== null ? <span class="gv-chip warn">冲突</span> : null}
+                <span class="gv-head-spacer" />
+                {openFile === null || openFile.conflict !== null ? null : (
+                  <span class="gv-main-actions">
+                    {openSide === "worktree" ? (
+                      <button class="gv-mini" disabled={store.busy} onClick={() => void store.stage([selection.path])}>
+                        {openFile.untracked ? "跟踪文件" : "暂存文件"}
                       </button>
-                    </>
-                  )}
-                </div>
-                {selection.kind === "commit" ? <GitCommitDetail store={store} /> : null}
-                {diffState.kind === "ready" && diffState.diff.truncated ? (
-                  <div class="gv-banner">patch 超过 1 MB，已截断；按块操作已禁用。</div>
-                ) : null}
-                {diffState.kind === "ready" && diffState.diff.binary ? (
-                  <p class="gv-empty pad">二进制文件没有文本 diff。</p>
-                ) : diffState.kind === "loading" ? (
-                  <p class="gv-empty pad">读取 diff…</p>
-                ) : diffState.kind === "error" ? (
-                  <p class="gv-empty pad err">{diffState.error}</p>
-                ) : diffState.kind === "ready" && rows.length === 0 ? (
-                  <p class="gv-empty pad">没有差异。</p>
-                ) : diffState.kind === "ready" ? (
-                  <GitDiffView
-                    rows={rows}
-                    path={selection.kind === "commit" ? (selection.file ?? "") : selection.path}
-                    hunkActions={hunkActions}
-                  />
-                ) : null}
+                    ) : (
+                      <button class="gv-mini" disabled={store.busy} onClick={() => void store.unstage([selection.path])}>
+                        取消暂存
+                      </button>
+                    )}
+                    <button
+                      class="gv-mini danger"
+                      disabled={store.busy}
+                      onClick={() => {
+                        const scope = openFile.untracked ? "untracked" : openSide === "index" ? "all" : "worktree";
+                        const verb = openFile.untracked ? "删除" : "丢弃";
+                        store.requestDiscard([selection.path], scope, `${verb} ${selection.path} 的改动？`);
+                      }}
+                    >
+                      {openFile.untracked ? "删除文件" : "丢弃改动"}
+                    </button>
+                  </span>
+                )}
+                <button
+                  class="gv-mini"
+                  title={store.context === "full" ? "只看改动前后的几行" : "载入完整上下文（可折叠）"}
+                  onClick={() => store.setContext(store.context === "full" ? "small" : "full")}
+                >
+                  {store.context === "full" ? "3 行上下文" : "完整上下文"}
+                </button>
               </>
             )}
+            <button class="gv-mini" title="关闭 diff（Esc）" onClick={() => store.clearSelection()}>
+              ✕
+            </button>
           </div>
-        </div>
+          {selection.kind === "commit" ? <GitCommitDetail store={store} /> : null}
+          {diffState.kind === "ready" && diffState.diff.truncated ? (
+            <div class="gv-banner">patch 超过 1 MB，已截断；按块操作已禁用。</div>
+          ) : null}
+          {diffState.kind === "ready" && diffState.diff.binary ? (
+            <p class="gv-empty pad">二进制文件没有文本 diff。</p>
+          ) : diffState.kind === "loading" ? (
+            <p class="gv-empty pad">读取 diff…</p>
+          ) : diffState.kind === "error" ? (
+            <p class="gv-empty pad err">{diffState.error}</p>
+          ) : diffState.kind === "ready" && rows.length === 0 ? (
+            <p class="gv-empty pad">没有差异。</p>
+          ) : diffState.kind === "ready" ? (
+            <GitDiffView
+              rows={rows}
+              path={selection.kind === "commit" ? (selection.file ?? "") : selection.path}
+              hunkActions={hunkActions}
+            />
+          ) : null}
+        </section>
       )}
 
       {store.confirm === null ? null : (
@@ -308,6 +327,6 @@ export function GitView({ onClose }: { onClose: () => void }): JSX.Element {
           </div>
         </div>
       )}
-    </main>
+    </>
   );
 }
