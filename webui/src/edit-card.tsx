@@ -1,15 +1,17 @@
 // Edit tool card: collapsed-bar style (类 Claude.ai). Expanded by default, one
 // bar with status, file path, +N −M stats and the layout toggle above the diff
 // (per-line syntax highlight, word-level change highlight); a user's collapse is
-// remembered per card for its lifetime. While the tool runs, the bridge computes
-// a preview diff from the call args and the card shows it as-is; the
+// remembered per card for its lifetime. While the tool runs (or while its
+// arguments still stream), the bridge computes a preview diff from the call args
+// and the card shows it as-is; when that preview is unavailable the card falls
+// back to a diff of the call's own texts, marked as an estimate. The
 // authoritative result diff replaces it seamlessly.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { JSX } from "preact";
 import type { ToolExecution } from "./tool-store";
 import { getDiffLayout, onDiffLayoutChange, setDiffLayout, type DiffLayout } from "./diff-layout";
 import { getPiCwd, onPiCwdChange } from "./pi-cwd";
-import { diffWords, type WordSeg } from "./diff-engine";
+import { diffWords, formatLineDiff, type WordSeg } from "./diff-engine";
 import { langForPath, lineHtml } from "./highlight";
 import { PathLabel, relativeToCwd, splitPath, toolPathArg } from "./path-label";
 import { IconColumns, IconEdit, IconEye } from "./icons";
@@ -136,6 +138,17 @@ function getPreview(toolCallId: string, request: PreviewRequest): Promise<string
     }
   }
   return promise;
+}
+
+/**
+ * Diff of the call's own texts, for when the file preview cannot be read (the
+ * bridge may be older than the endpoint). Line numbers are relative to the
+ * fragments, so the card marks these stats as an estimate.
+ */
+function argsDiff(request: PreviewRequest): string {
+  const oldText = request.edits.map((edit) => edit.oldText).join("\n");
+  const newText = request.edits.map((edit) => edit.newText).join("\n");
+  return formatLineDiff(oldText, newText, 2);
 }
 
 function DiffLine({ kind, num, html }: { kind: "ctx" | "del" | "add"; num: string; html: string }): JSX.Element {
@@ -279,22 +292,22 @@ export function EditCard({ exec }: { exec: ToolExecution }): JSX.Element {
   useEffect(() => onDiffLayoutChange(() => setLayoutState(getDiffLayout())), []);
 
   const [preview, setPreview] = useState<string | undefined>(undefined);
+  const [estimated, setEstimated] = useState(false);
+  // Complete args only: an edit preview needs the path and every old/new text.
+  const request = useMemo(() => previewRequest(exec.args), [exec.args]);
   useEffect(() => {
-    if (!running || exec.diff !== undefined) return;
-    // Same toolCallId may remount (message re-render); reuse the fetch.
-    const cached = previewCache.get(exec.toolCallId);
-    if (cached) {
-      void cached.then((diff) => {
-        if (diff !== undefined) setPreview(diff);
-      });
-      return;
-    }
-    const request = previewRequest(exec.args);
-    if (!request) return;
+    if (!running || exec.diff !== undefined || request === null) return;
+    // Same toolCallId may remount (message re-render); the cache reuses the fetch.
     void getPreview(exec.toolCallId, request).then((diff) => {
-      if (diff !== undefined) setPreview(diff);
+      if (diff !== undefined) {
+        setPreview(diff);
+        setEstimated(false);
+        return;
+      }
+      setPreview(argsDiff(request));
+      setEstimated(true);
     });
-  }, [running, exec.diff]);
+  }, [running, exec.diff, request, exec.toolCallId]);
 
   const diff = exec.diff ?? (running ? preview : undefined);
   const rows = useMemo(() => (diff !== undefined ? parseRows(diff) : []), [diff]);
@@ -369,7 +382,12 @@ export function EditCard({ exec }: { exec: ToolExecution }): JSX.Element {
             <span class="stat-del">−{stats.dels}</span>
           </span>
         ) : null}
-        {running && diff === undefined ? <span class="edit-pending">预览计算中…</span> : null}
+        {running && estimated ? (
+          <span class="edit-pending" title="文件预览不可用，按调用参数估算">
+            预计
+          </span>
+        ) : null}
+        {running && diff === undefined && request !== null ? <span class="edit-pending">预览计算中…</span> : null}
         {exec.durationMs != null && !running ? (
           <span class="tool-duration">{(exec.durationMs / 1000).toFixed(1)}s</span>
         ) : null}

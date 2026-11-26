@@ -114,6 +114,28 @@ function AssistantBlock({
           const call = c as ToolCallContent;
           const exec = toolStore.executions.get(call.id);
           if (exec) return <ToolCard key={i} exec={exec} />;
+          // Still streaming (or the run has not reached tool_execution_start
+          // yet): build the card from the call itself, so the target file shows
+          // from the first argument delta and the edit preview starts as soon
+          // as the arguments are complete, not when the tool ends.
+          if (streaming) {
+            return (
+              <ToolCard
+                key={i}
+                exec={{
+                  toolCallId: call.id,
+                  toolName: call.name,
+                  args: call.arguments,
+                  turn: toolStore.turn,
+                  state: "running",
+                  partial: "",
+                  resultText: "",
+                  resultImages: [],
+                  isError: false,
+                }}
+              />
+            );
+          }
           // No execution seen (call only, aborted run): render a call-only stub.
           return (
             <div key={i} class="tool-card done">
