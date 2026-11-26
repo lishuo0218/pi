@@ -9,11 +9,13 @@ import type { ToolExecution } from "./tool-store";
 import { getDiffLayout, onDiffLayoutChange, setDiffLayout, type DiffLayout } from "./diff-layout";
 import { IconColumns } from "./icons";
 import { EditCard } from "./edit-card";
+import { WriteCard } from "./write-card";
 import { BashCard, bashRunFromExec } from "./bash-card";
 import { AskCard } from "./ask-card";
 import { TodoCard } from "./todo-card";
 import { ListCard } from "./list-card";
 import { toolPathArg } from "./path-label";
+import { fadeSwap } from "./fade-swap";
 
 /** One-line human summary of the tool call from its args. */
 export function toolSummary(args: Record<string, unknown>): string {
@@ -165,15 +167,16 @@ function OutputBlock({
   isError: boolean;
 }): JSX.Element | null {
   const [expanded, setExpanded] = useState(false);
+  const preRef = useRef<HTMLPreElement | null>(null);
   if (!text) return null;
   const lines = text.split("\n");
   const long = lines.length > 20;
   const shown = expanded || !long ? text : lines.slice(0, 20).join("\n");
   return (
     <div>
-      <pre class={`tool-output${isError ? " err" : ""}`}>{shown}</pre>
+      <pre ref={preRef} class={`tool-output${isError ? " err" : ""}`}>{shown}</pre>
       {long ? (
-        <button class="tool-more" onClick={() => setExpanded(!expanded)}>
+        <button class="tool-more" onClick={() => fadeSwap(preRef.current, () => setExpanded(!expanded))}>
           {expanded ? "收起" : `展开全部 ${lines.length} 行`}
         </button>
       ) : null}
@@ -184,6 +187,7 @@ function OutputBlock({
 export function ToolCard({ exec }: { exec: ToolExecution }): JSX.Element {
   // Specialized cards first; everything else the generic card.
   if (exec.toolName === "edit") return <EditCard exec={exec} />;
+  if (exec.toolName === "write") return <WriteCard exec={exec} />;
   if (exec.toolName === "bash") {
     return <BashCard run={bashRunFromExec(exec)} behavior={{ kind: "stream" }} />;
   }
