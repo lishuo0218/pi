@@ -3880,6 +3880,11 @@ body {
 .gv-commit-input:focus {
   border-color: var(--c-border-strong);
 }
+/* 生成中：内容由模型写入，不可编辑，用光标与底色提示 */
+.gv-commit-input[readonly] {
+  background: var(--c-bg-subtle);
+  cursor: progress;
+}
 .gv-commit-row {
   display: flex;
   align-items: center;

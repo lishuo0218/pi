@@ -36,7 +36,23 @@ export async function write(dir: string, path: string, text: string): Promise<vo
 
 async function temp(prefix: string): Promise<Fixture> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
-  return { dir, cleanup: () => rm(dir, { recursive: true, force: true }) };
+  return { dir, cleanup: () => removeDir(dir) };
+}
+
+/**
+ * Remove a fixture directory. Windows keeps a directory locked while a child
+ * that was just killed still holds it as its working directory, so a stale
+ * lock is retried briefly instead of failing the whole file.
+ */
+async function removeDir(dir: string, attempt = 0): Promise<void> {
+  try {
+    await rm(dir, { recursive: true, force: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (attempt >= 9 || (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM")) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await removeDir(dir, attempt + 1);
+  }
 }
 
 /** An empty directory that is not a repository. */

@@ -20,6 +20,7 @@ import { handleEditPreview, readJsonBody } from "./edit-preview.ts";
 import { handleListDir } from "./list-dir.ts";
 import { handleFilePreview } from "./file-preview.ts";
 import { handleGit } from "./git/index.ts";
+import { handleGitDraftStream } from "./git/draft.ts";
 import { handleGitEvents } from "./git/events.ts";
 import { checkOrigin } from "./origin.ts";
 
@@ -97,6 +98,18 @@ export function startBridge(opts: BridgeOptions): Promise<BridgeHandle> {
     const posts = localPosts(opts.piPath);
     const server = http.createServer((req, res) => {
       const url = (req.url ?? "/").split("?")[0] ?? "/";
+      // The AI draft owns the response for as long as the model writes, so it is
+      // not awaited like a POST reply. It takes no fields: the attached
+      // session's working directory chooses the repository.
+      if (url === "/api/git/draft" && req.method === "POST") {
+        if (!browserRequestAllowed(req, opts.token)) {
+          res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ error: "forbidden" }));
+          return;
+        }
+        handleGitDraftStream(req, res, pool.attached?.cwd ?? opts.cwd, opts.piPath);
+        return;
+      }
       const localPost = posts[url];
       const localStream = LOCAL_STREAMS[url];
       if (localStream !== undefined && req.method === "GET") {

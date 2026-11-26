@@ -1,6 +1,6 @@
 // AI-written commit message for the Git view: build a prompt out of the staged
-// patch (or every pending change when nothing is staged), run pi once in print
-// mode with no tools, and return the text the model answered with. The child is
+// patch (or every pending change when nothing is staged), run pi once in JSON
+// print mode with no tools, and hand out the answer as it streams. The child is
 // killed after DRAFT_TIMEOUT_MS so a stalled model cannot hold the request.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { piInvocation } from "../pi-process.ts";
@@ -15,7 +15,7 @@ const FILE_LINES_CAP = 200;
 const PROMPT_CAP = 60_000;
 /** Longest draft kept; a model that ignores the length rule still fits a commit. */
 const DRAFT_CAP = 4_000;
-/** Longest stdout kept from pi; anything past this is not a commit message. */
+/** Longest answer kept from pi; anything past this is not a commit message. */
 const STDOUT_CAP = 200_000;
 const UNTRACKED_CAP = 20;
 
@@ -102,11 +102,26 @@ export function buildPrompt(input: { diff: string; staged: boolean; untracked: s
 /**
  * Strip what models add around a message anyway: a code fence, wrapping
  * quotes, a "commit message:" style label, and trailing spaces per line.
+ *
+ * Also called on every streaming snapshot, so a half-written fence is dropped
+ * as soon as its opening line arrives: the box must never show backticks that
+ * disappear once the answer ends.
  */
 export function cleanDraft(raw: string): string {
   let text = raw.replaceAll("\r\n", "\n").trim();
-  const fenced = /^```[a-zA-Z]*\n([\s\S]*?)\n?```$/.exec(text);
-  if (fenced?.[1] !== undefined) text = fenced[1].trim();
+  let fenced = false;
+  const closed = /^```[a-zA-Z]*\n([\s\S]*?)\n?```$/.exec(text);
+  if (closed?.[1] !== undefined) {
+    text = closed[1].trim();
+    fenced = true;
+  } else {
+    const opened = /^```[a-zA-Z]*\n?/.exec(text);
+    if (opened !== null) {
+      text = text.slice(opened[0].length);
+      fenced = true;
+    }
+  }
+  if (fenced) text = text.replace(/\n?```$/, "");
   const quoted = /^(["'`])([\s\S]*)\1$/.exec(text);
   if (quoted?.[2] !== undefined) text = quoted[2].trim();
   text = text.replace(/^(commit message|提交说明)\s*[:：]\s*/i, "");
@@ -118,37 +133,103 @@ export function cleanDraft(raw: string): string {
     .slice(0, DRAFT_CAP);
 }
 
+/** Where streaming snapshots go, and how the caller stops the run. */
+export type DraftStream = {
+  /** Cleaned text so far, sent on every delta; a snapshot, not a delta. */
+  onSnapshot?: (text: string) => void;
+  /** Aborting kills the child; the run then resolves as stopped. */
+  signal?: AbortSignal;
+};
+
 /**
- * Run `pi --mode text` once with the prompt on stdin, so no argv limit applies,
- * and collect its answer. Print mode writes the assistant text to stdout and
- * its diagnostics to stderr, which is why a non-zero exit turns into the
- * stderr's first line rather than a generic failure.
+ * Assistant text carried by one JSON-mode record: a delta to append, or the
+ * final message that replaces what the deltas built. Null for other records.
+ */
+function recordText(record: Record<string, unknown>): { text: string; final: boolean } | null {
+  if (record.type === "message_update") {
+    const event = record.assistantMessageEvent;
+    if (typeof event !== "object" || event === null) return null;
+    const { type, delta } = event as Record<string, unknown>;
+    return type === "text_delta" && typeof delta === "string" ? { text: delta, final: false } : null;
+  }
+  // The final message is authoritative: a provider that does not stream still
+  // answers here, and the accumulated deltas are only a means of showing it.
+  if (record.type === "message_end") {
+    const message = record.message;
+    if (typeof message !== "object" || message === null) return null;
+    const { role, content } = message as Record<string, unknown>;
+    if (role !== "assistant" || !Array.isArray(content)) return null;
+    const parts = content.flatMap((part: unknown) => {
+      if (typeof part !== "object" || part === null) return [];
+      const { type, text } = part as Record<string, unknown>;
+      return type === "text" && typeof text === "string" ? [text] : [];
+    });
+    return parts.length === 0 ? null : { text: parts.join("\n"), final: true };
+  }
+  return null;
+}
+
+/**
+ * Run `pi --mode json` once with the prompt on stdin, so no argv limit applies.
+ * JSON mode streams the answer as `message_update` records, so every text delta
+ * becomes a cleaned snapshot of the message so far; the run's own result is the
+ * final text. Diagnostics go to stderr, which is why a non-zero exit turns into
+ * the stderr's first line rather than a generic failure.
  */
 function runPi(
   piPath: string,
   cwd: string,
   prompt: string,
+  stream: DraftStream,
 ): Promise<{ ok: true; text: string } | { error: string; code: GitErrorCode }> {
   const { command, args, shell } = piInvocation(piPath, [
     "--mode",
-    "text",
+    "json",
     "--no-session",
     "--no-tools",
     "--no-extensions",
     "--no-mcp",
   ]);
   return new Promise((resolve) => {
-    let stdout = "";
+    let answer = "";
+    let buffer = "";
     let stderr = "";
     let settled = false;
     let timer: NodeJS.Timeout | null = null;
+    let child: ChildProcessWithoutNullStreams | null = null;
     const finish = (result: { ok: true; text: string } | { error: string; code: GitErrorCode }): void => {
       if (settled) return;
       settled = true;
       if (timer !== null) clearTimeout(timer);
+      stream.signal?.removeEventListener("abort", stop);
       resolve(result);
     };
-    let child: ChildProcessWithoutNullStreams;
+    const stop = (): void => {
+      finish({ error: "已停止", code: "failed" });
+      child?.kill();
+    };
+    if (stream.signal?.aborted) {
+      finish({ error: "已停止", code: "failed" });
+      return;
+    }
+    const emit = (): void => {
+      if (stream.onSnapshot !== undefined) stream.onSnapshot(cleanDraft(answer));
+    };
+    const consume = (line: string): void => {
+      if (line.trim() === "" || answer.length >= STDOUT_CAP) return;
+      let record: unknown;
+      try {
+        record = JSON.parse(line);
+      } catch {
+        // Wire input: a line that is not a record is noise, not a failure.
+        return;
+      }
+      if (typeof record !== "object" || record === null || Array.isArray(record)) return;
+      const update = recordText(record as Record<string, unknown>);
+      if (update === null) return;
+      answer = update.final ? update.text : answer + update.text;
+      emit();
+    };
     try {
       child = spawn(command, args, {
         cwd,
@@ -165,12 +246,19 @@ function runPi(
     // waits on a child that survived SIGTERM.
     timer = setTimeout(() => {
       finish({ error: `生成超过 ${DRAFT_TIMEOUT_MS / 1000} 秒，已中止`, code: "timeout" });
-      child.kill();
+      child?.kill();
     }, DRAFT_TIMEOUT_MS);
+    stream.signal?.addEventListener("abort", stop);
     child.stdout.setEncoding("utf-8");
     child.stderr.setEncoding("utf-8");
     child.stdout.on("data", (chunk: string) => {
-      if (stdout.length < STDOUT_CAP) stdout += chunk;
+      buffer += chunk;
+      let end = buffer.indexOf("\n");
+      while (end >= 0) {
+        consume(buffer.slice(0, end));
+        buffer = buffer.slice(end + 1);
+        end = buffer.indexOf("\n");
+      }
     });
     child.stderr.on("data", (chunk: string) => {
       if (stderr.length < 4_000) stderr += chunk;
@@ -185,7 +273,7 @@ function runPi(
         finish({ error: line ?? `pi 退出码 ${code ?? "?"}`, code: "failed" });
         return;
       }
-      const text = cleanDraft(stdout);
+      const text = cleanDraft(answer);
       finish(text === "" ? { error: "模型没有返回内容", code: "failed" } : { ok: true, text });
     });
     // The stub or a fast failure may exit before the prompt is written.
@@ -194,12 +282,15 @@ function runPi(
   });
 }
 
-/** Draft a commit message for the repository's pending changes. */
-export async function draftCommitMessage(repo: Repo, piPath: string): Promise<GitResult> {
+/**
+ * Draft a commit message for the repository's pending changes, reporting the
+ * text as it arrives when `stream.onSnapshot` is given.
+ */
+export async function draftCommitMessage(repo: Repo, piPath: string, stream: DraftStream = {}): Promise<GitResult> {
   const patch = await commitPatch(repo);
   if ("error" in patch) return { ok: false, error: patch.error, code: patch.code };
   const prompt = buildPrompt({ ...patch, diff: capPatch(patch.diff) });
-  const draft = await runPi(piPath, repo.root, prompt);
+  const draft = await runPi(piPath, repo.root, prompt, stream);
   if ("error" in draft) return { ok: false, error: draft.error, code: draft.code };
   return { ok: true, action: "message", message: draft.text };
 }

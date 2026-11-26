@@ -23,8 +23,9 @@ export function GitCommitBox({ store, status }: { store: GitStore; status: GitSt
   const [amend, setAmend] = useState(false);
   const box = useRef<HTMLTextAreaElement | null>(null);
   const staged = status.files.filter((file) => !file.untracked && file.conflict === null && file.index !== ".").length;
-  const canCommit = message.trim() !== "" && (amend || staged > 0) && !store.busy;
-  const canDraft = status.files.length > 0 && !store.busy && !store.drafting;
+  const canCommit = message.trim() !== "" && (amend || staged > 0) && !store.busy && !store.drafting;
+  // While a draft streams the button stops it instead of starting another.
+  const canDraft = store.drafting || (status.files.length > 0 && !store.busy);
 
   // The AI draft and the reset after a commit both change the text from
   // outside this component's input event, so the height follows the value.
@@ -41,7 +42,9 @@ export function GitCommitBox({ store, status }: { store: GitStore; status: GitSt
   };
 
   const draft = async (): Promise<void> => {
-    const text = await store.draftMessage();
+    // Snapshots replace the box content as the model writes, so the text is
+    // never briefly empty and a stop keeps whatever already arrived.
+    const text = await store.draftMessage(setMessage);
     if (text !== null) setMessage(text);
   };
 
@@ -54,6 +57,8 @@ export function GitCommitBox({ store, status }: { store: GitStore; status: GitSt
         rows={3}
         placeholder="提交说明（Ctrl+Enter 提交）"
         spellcheck={false}
+        // Read-only while the model writes: the snapshots are the content.
+        readOnly={store.drafting}
         onInput={(event) => setMessage(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -66,14 +71,24 @@ export function GitCommitBox({ store, status }: { store: GitStore; status: GitSt
         <button
           class="gv-mini"
           disabled={!canDraft}
-          title={staged === 0 ? "用全部待提交改动生成提交说明" : "用已暂存的改动生成提交说明"}
+          title={
+            store.drafting
+              ? "停止生成，保留已生成的部分"
+              : staged === 0
+                ? "用全部待提交改动生成提交说明"
+                : "用已暂存的改动生成提交说明"
+          }
           onClick={() => {
             if (!canDraft) return;
+            if (store.drafting) {
+              store.stopDraft();
+              return;
+            }
             if (message.trim() === "") void draft();
             else store.requestConfirm("输入框里已有提交说明，覆盖它？", "覆盖", () => void draft());
           }}
         >
-          {store.drafting ? "生成中…" : "AI 生成"}
+          {store.drafting ? "停止" : "AI 生成"}
         </button>
         <label class="gv-check" title={status.unborn ? "还没有提交可以修补" : "替换上一次提交"}>
           <input
@@ -85,11 +100,13 @@ export function GitCommitBox({ store, status }: { store: GitStore; status: GitSt
           修补上次
         </label>
         <span class="gv-commit-hint">
-          {amend
-            ? "将替换上一次提交"
-            : staged === 0
-              ? "先暂存要提交的改动"
-              : `已暂存 ${staged} 个文件`}
+          {store.drafting
+            ? "模型正在生成，输入框暂不可编辑"
+            : amend
+              ? "将替换上一次提交"
+              : staged === 0
+                ? "先暂存要提交的改动"
+                : `已暂存 ${staged} 个文件`}
         </span>
         <span class="gv-head-spacer" />
         <button class="gv-primary" disabled={!canCommit} onClick={() => void submit()}>

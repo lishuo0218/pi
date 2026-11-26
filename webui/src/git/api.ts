@@ -262,6 +262,77 @@ export async function callGit(request: GitRequest): Promise<GitResult> {
   }
 }
 
+/** One frame of the draft stream; the bridge owns the shape. */
+type DraftFrame =
+  | { type: "snapshot"; text: string }
+  | { type: "done"; message: string }
+  | { type: "error"; error: string; code: GitErrorCode };
+
+/** Parse one SSE frame; null for comments, keep-alives and unknown shapes. */
+function parseDraftFrame(raw: string): DraftFrame | null {
+  const data = raw
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .join("\n");
+  if (data === "") return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (!isRecord(value)) return null;
+  if (value.type === "snapshot" && typeof value.text === "string") return { type: "snapshot", text: value.text };
+  if (value.type === "done" && typeof value.message === "string") return { type: "done", message: value.message };
+  if (value.type === "error" && typeof value.error === "string") {
+    return { type: "error", error: value.error, code: parseErrorCode(value.code) };
+  }
+  return null;
+}
+
+/**
+ * Ask for an AI commit message, delivering the text as it arrives: the reply is
+ * a stream of snapshots, so the box fills while the model writes. Aborting
+ * `signal` stops the model run and leaves the text received so far in place.
+ */
+export async function streamGitDraft(handlers: {
+  onSnapshot: (text: string) => void;
+  signal: AbortSignal;
+}): Promise<GitResult> {
+  let res: Response;
+  try {
+    res = await fetch("/api/git/draft", { method: "POST", signal: handlers.signal });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error), code: "failed" };
+  }
+  if (!res.ok || res.body === null) return { ok: false, error: `请求失败（${res.status}）`, code: "failed" };
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let end = buffer.indexOf("\n\n");
+      while (end >= 0) {
+        const frame = parseDraftFrame(buffer.slice(0, end));
+        buffer = buffer.slice(end + 2);
+        if (frame !== null) {
+          if (frame.type === "snapshot") handlers.onSnapshot(frame.text);
+          else if (frame.type === "done") return { ok: true, action: "message", message: frame.message };
+          else return { ok: false, error: frame.error, code: frame.code };
+        }
+        end = buffer.indexOf("\n\n");
+      }
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error), code: "failed" };
+  }
+  return { ok: false, error: "生成中断", code: "failed" };
+}
+
 export type ChangeHandlers = {
   /** Something in the repository moved; refetch what is on screen. */
   onChange: () => void;

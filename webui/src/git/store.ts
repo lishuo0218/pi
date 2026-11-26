@@ -15,7 +15,7 @@ import type {
   GitSide,
   GitStatus,
 } from "../../bridge/git/types";
-import { callGit, watchGitChanges } from "./api";
+import { callGit, streamGitDraft, watchGitChanges } from "./api";
 
 export type GitStatusState =
   | { kind: "loading" }
@@ -98,6 +98,8 @@ export class GitStore {
   private detailSeq = 0;
   private historySeq = 0;
   private closeStream: (() => void) | null = null;
+  /** Set while a draft streams, so the Stop button can abort the request. */
+  private draftAbort: AbortController | null = null;
   private disposers: (() => void)[] = [];
   private noticeTimer: number | null = null;
 
@@ -137,6 +139,7 @@ export class GitStore {
   }
 
   dispose(): void {
+    this.draftAbort?.abort();
     this.closeStream?.();
     this.closeStream = null;
     for (const dispose of this.disposers) dispose();
@@ -476,22 +479,33 @@ export class GitStore {
   }
 
   /**
-   * Ask the bridge for an AI-written message; the view owns the text box, so
-   * the draft comes back as a value (null means the notice already says why).
+   * Ask the bridge for an AI-written message, in the words the box shows it:
+   * each snapshot replaces the text, so the draft appears while it is written.
+   * Returns the final text, or null when nothing should be filled in (an error
+   * is already in the notice, a stop leaves the partial text alone).
    */
-  async draftMessage(): Promise<string | null> {
+  async draftMessage(onSnapshot: (text: string) => void): Promise<string | null> {
     if (this.drafting) return null;
+    const abort = new AbortController();
+    this.draftAbort = abort;
     this.drafting = true;
     this.emit();
-    const res = await callGit({ action: "draftMessage" });
+    const res = await streamGitDraft({ onSnapshot, signal: abort.signal });
+    this.draftAbort = null;
     this.drafting = false;
     this.emit();
+    if (abort.signal.aborted) return null;
     if (!res.ok) {
       this.notify(`生成提交说明失败：${res.error}`, "error");
       return null;
     }
     if (res.action !== "message") return null;
     return res.message;
+  }
+
+  /** Stop the running draft; the text written so far stays in the box. */
+  stopDraft(): void {
+    this.draftAbort?.abort();
   }
 
   /** Read the branch/remote/tag names the history filter lists. */
