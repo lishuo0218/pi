@@ -1,15 +1,18 @@
-// Sidebar (常驻固定 260px): three-section redesign — search + new session on
-// top, pinned strip + per-cwd session-group cards in the middle, a settings
-// popover entry at the bottom. Keeps every former capability (switch, rename,
-// clone, export, delete, auto-compaction / steering / follow-up settings) and
-// adds session search and pinning (bridge_toggle_pin). Switching a session
-// rehydrates the message stream and reloads the list in place.
+// Sidebar (draggable width, remembered): search + new session on top, a pinned
+// strip and per-cwd session groups as flat rows in the middle, a settings
+// popover entry at the bottom. Minimal row styling: no cards or borders, a
+// hover wash, the current row on a soft inset and its title in bold. Keeps
+// every former capability (switch, rename, clone, export, delete,
+// auto-compaction / steering / follow-up settings) plus search and pinning.
+// Switching a session rehydrates the message stream and reloads the list in
+// place.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { JSX } from "preact";
 import type { Command, RpcConnection } from "./rpc-connection";
 import type { SessionStore } from "./session-store";
 import type { ResponseRecord } from "./protocol";
-import { IconChevron, IconGear, IconStar } from "./icons";
+import { IconChevron, IconGear, IconSearch, IconStar } from "./icons";
+import { saveSidebarWidth, setSidebarWidth } from "./sidebar-width";
 import { Collapse } from "./collapse";
 
 export type SessionSummary = {
@@ -115,7 +118,7 @@ export function Sidebar({
   const [newDirInput, setNewDirInput] = useState("");
   // The native folder dialog blocks until the user decides; browse waits.
   const [picking, setPicking] = useState(false);
-  // Collapsed group-card directories. First load expands the current
+  // Collapsed group directories. First load expands the current
   // session's group and every newer group above it; older groups below stay
   // collapsed. Not persisted: a refresh returns to the default split.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -518,38 +521,44 @@ export function Sidebar({
 
   const sessionRow = (s: SessionSummary): JSX.Element =>
     renaming === s.path ? (
-      <input
-        key={s.path}
-        class="panel-rename-input"
-        value={renameValue}
-        placeholder="名称，留空清除"
-        autoFocus
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") void commitRename();
-          if (e.key === "Escape") setRenaming(null);
-        }}
-        onInput={(e) => setRenameValue((e.target as HTMLInputElement).value)}
-      />
+      <div key={s.path} class="session-row editing">
+        <input
+          class="panel-rename-input"
+          value={renameValue}
+          placeholder="名称，留空清除"
+          autoFocus
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void commitRename();
+            if (e.key === "Escape") setRenaming(null);
+          }}
+          onInput={(e) => setRenameValue((e.target as HTMLInputElement).value)}
+        />
+      </div>
     ) : (
       <div
         key={s.path}
-        class={`session-card${s.path === current ? " current" : ""}`}
+        class={`session-row${s.path === current ? " current" : ""}`}
+        title={s.path}
         onClick={() => {
           if (!busy) void switchTo(s.path);
         }}
         onContextMenu={(e) => openMenu(e, s)}
       >
-        <div class="session-card-top">
-          <span class="session-card-name">{sessionLabel(s)}</span>
+        <div class="session-row-top">
+          <span class="session-row-name">{sessionLabel(s)}</span>
           {runningPaths.has(s.path) ? (
             <span class="session-run-badge" title="运行中（后台继续运行）">
               <span class="spinner" />
             </span>
           ) : null}
-          {s.pinned ? <span class="session-pin-badge" title="已置顶"><IconStar size={11} /></span> : null}
+          {s.pinned ? (
+            <span class="session-pin-badge" title="已置顶">
+              <IconStar size={11} />
+            </span>
+          ) : null}
         </div>
-        <div class="session-card-bottom">
+        <div class="session-row-bottom">
           <span class="session-meta">{formatMtime(s.mtime)}</span>
           <span
             class="session-more"
@@ -566,13 +575,18 @@ export function Sidebar({
   return (
     <div class="sidebar">
       <div class="sidebar-top">
-        <input
-          class="sidebar-search"
-          type="search"
-          placeholder="搜索会话…"
-          value={query}
-          onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
-        />
+        <div class="sidebar-search-row">
+          <span class="sidebar-search-icon">
+            <IconSearch />
+          </span>
+          <input
+            class="sidebar-search"
+            type="search"
+            placeholder="搜索会话…"
+            value={query}
+            onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+          />
+        </div>
         <button
           class="sidebar-new-btn"
           disabled={busy}
@@ -639,22 +653,23 @@ export function Sidebar({
             {filtered.map((g) => {
               // While searching, every match must be visible: expand all.
               const isCollapsed = query.trim() === "" && collapsed.has(g.name);
+              const isCurrent = activeGroup ? g.name === activeGroup.name : g.current;
               return (
-                <div key={g.name} class="group-card">
-                  <div class="group-card-head-row">
+                <div key={g.name} class="session-group">
+                  <div class="session-group-head-row">
                     <button
-                      class={`group-card-head${activeGroup ? (g.name === activeGroup.name ? " current" : "") : g.current ? " current" : ""}${isCollapsed ? " collapsed" : ""}`}
+                      class={`session-group-head${isCurrent ? " current" : ""}${isCollapsed ? " collapsed" : ""}`}
                       title={g.cwd ?? g.name}
                       onClick={() => toggleGroup(g.name)}
                     >
                       <span class="caret">
-                        <IconChevron />
+                        <IconChevron size={11} />
                       </span>
-                      <span class="group-card-cwd">{labels.get(g.name) ?? groupLabel(g)}</span>
-                      <span class="group-count">{g.sessions.length}</span>
+                      <span class="session-group-label">{labels.get(g.name) ?? groupLabel(g)}</span>
+                      <span class="session-group-count">{g.sessions.length}</span>
                     </button>
                     <button
-                      class="group-card-add"
+                      class="session-group-add"
                       title={g.cwd ? `在 ${g.cwd} 创建新会话` : "该分组没有工作目录信息"}
                       disabled={busy || !g.cwd}
                       onClick={() => void newSession(g.cwd ?? undefined)}
@@ -663,7 +678,7 @@ export function Sidebar({
                     </button>
                   </div>
                   <Collapse open={!isCollapsed}>
-                    <div class="group-card-body">{g.sessions.map(sessionRow)}</div>
+                    <div class="session-group-body">{g.sessions.map(sessionRow)}</div>
                   </Collapse>
                 </div>
               );
@@ -719,6 +734,7 @@ export function Sidebar({
           </div>
         ) : null}
       </div>
+      <div class="sidebar-resizer" title="拖动调整宽度" onPointerDown={startResize} />
       {menu ? (
         <div
           class="session-menu"
@@ -753,4 +769,21 @@ export function Sidebar({
       ) : null}
     </div>
   );
+}
+
+/**
+ * Drag the sidebar's right edge. The sidebar starts at x=0, so the pointer's
+ * page x is its width; widths go to sidebar-width.ts on every move so the
+ * conversation follows the pointer, the stored value is written once on release.
+ */
+function startResize(event: JSX.TargetedPointerEvent<HTMLDivElement>): void {
+  event.preventDefault();
+  const move = (moveEvent: PointerEvent): void => setSidebarWidth(moveEvent.clientX);
+  const up = (): void => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    saveSidebarWidth();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
 }

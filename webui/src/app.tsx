@@ -17,6 +17,7 @@ import { ExtensionDialog, StatusChips, WidgetArea } from "./extension-ui";
 import { Sidebar } from "./sidebar";
 import { RightPanel } from "./right-panel";
 import { getPreviewWidth, onPreviewWidthChange } from "./panel-width";
+import { getSidebarWidth, onSidebarWidthChange } from "./sidebar-width";
 import { closePreview, getPreviewRequest, onPreviewChange } from "./preview-target";
 import { Logo } from "./logo";
 import { IconGit, IconImage, IconMenu, IconMoon, IconSun, IconColumns } from "./icons";
@@ -142,6 +143,8 @@ export function App(): JSX.Element {
   const [previewWidth, setPreviewWidth] = useState(getPreviewWidth);
   useEffect(() => onPreviewWidthChange(() => setPreviewWidth(getPreviewWidth())), []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(getSidebarWidth);
+  useEffect(() => onSidebarWidthChange(() => setSidebarWidth(getSidebarWidth())), []);
   const [injected, setInjected] = useState<{ v: number; text: string } | null>(null);
   const [readOnly, setReadOnly] = useState(false);
   const [piExited, setPiExited] = useState<{ code: number | null; signal: string | null } | null>(null);
@@ -158,8 +161,8 @@ export function App(): JSX.Element {
 
   // The stream/composer/banners shift left by this var when the sidebar shows.
   useLayoutEffect(() => {
-    document.documentElement.style.setProperty("--sidebar-w", sidebarOpen ? "260px" : "0px");
-  }, [sidebarOpen]);
+    document.documentElement.style.setProperty("--sidebar-w", sidebarOpen ? `${sidebarWidth}px` : "0px");
+  }, [sidebarOpen, sidebarWidth]);
 
   // The Git panel is a column, not an overlay: the stream gives up its width so
   // the conversation stays readable beside the commit box, files and history.

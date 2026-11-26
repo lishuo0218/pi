@@ -225,6 +225,16 @@ export function IconCheck({ size = 13 }: IconProps): JSX.Element {
   );
 }
 
+/** Session search field: a magnifier.**/
+export function IconSearch({ size = 13 }: IconProps): JSX.Element {
+  return (
+    <Svg size={size}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M20 20l-3.6-3.6" />
+    </Svg>
+  );
+}
+
 /**
  * Disclosure chevron, drawn pointing right. Callers rotate it 90° to point down
  * while the section is open (`.caret` in style.css), so the glyph never changes.
