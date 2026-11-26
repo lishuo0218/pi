@@ -1,7 +1,8 @@
 // Tool execution card (F-12): three states running/done/error. Read-only
-// tools get their own cards (read: numbered code; grep/find/ls: raw list),
-// as do edit (diff) and bash (terminal). The generic card keeps tool name plus
-// a short arg summary, the result text and any result images.
+// tools get their own cards (grep/find/ls: raw list), as do edit (diff) and
+// bash (terminal); read renders nothing, the message list drops it. The generic
+// card keeps tool name plus a short arg summary, the result text and any result
+// images.
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { JSX } from "preact";
 import type { ToolExecution } from "./tool-store";
@@ -9,7 +10,6 @@ import { getDiffLayout, onDiffLayoutChange, setDiffLayout, type DiffLayout } fro
 import { IconColumns } from "./icons";
 import { EditCard } from "./edit-card";
 import { BashCard, bashRunFromExec } from "./bash-card";
-import { ReadCard } from "./read-card";
 import { AskCard } from "./ask-card";
 import { TodoCard } from "./todo-card";
 import { ListCard } from "./list-card";
@@ -188,7 +188,6 @@ export function ToolCard({ exec }: { exec: ToolExecution }): JSX.Element {
   if (exec.toolName === "bash") {
     return <BashCard run={bashRunFromExec(exec)} behavior={{ kind: "stream" }} />;
   }
-  if (exec.toolName === "read") return <ReadCard exec={exec} />;
   if (exec.toolName === "ask_user") return <AskCard exec={exec} />;
   if (exec.toolName === "todo") return <TodoCard exec={exec} />;
   if (exec.toolName === "grep" || exec.toolName === "find" || exec.toolName === "ls") {

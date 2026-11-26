@@ -112,6 +112,9 @@ function AssistantBlock({
           );
         if (c.type === "toolCall") {
           const call = c as ToolCallContent;
+          // read only feeds the model: its card would just repeat file content
+          // in the transcript, so it is not rendered.
+          if (call.name === "read") return null;
           const exec = toolStore.executions.get(call.id);
           if (exec) return <ToolCard key={i} exec={exec} />;
           // Still streaming (or the run has not reached tool_execution_start
@@ -185,6 +188,8 @@ function ToolResultBlock({
     (cb) => toolStore.subscribe(cb),
     () => toolStore.version,
   );
+  // read is never rendered in the transcript (see AssistantBlock).
+  if (message.toolName === "read") return null;
   // Live runs render via the assistant's inline toolCall card already.
   if (toolStore.executions.has(message.toolCallId)) return null;
   const details = (message as unknown as { details?: Record<string, unknown> }).details;
