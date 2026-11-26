@@ -1,7 +1,9 @@
 // The files the agent changed in one turn, kept at the end of that turn in the
 // stream. Collapsed by default to a single line: file count plus the lines this
 // turn added and removed; expanding lists each file with its own counts.
-import { useState } from "preact/hooks";
+// The open flag is owned by the message stream (keyed by turn index): the
+// running turn's card moves to a new host unit on every streamed row, so
+// instance state here would collapse it while the model is still working.
 import type { JSX } from "preact";
 import type { SessionTurn } from "./session-files";
 import { IconChevron } from "./icons";
@@ -25,19 +27,22 @@ export function TurnFilesCard({
   turn,
   cwd,
   theme,
+  open,
+  onToggle,
 }: {
   turn: SessionTurn;
   /** pi's working directory, for the shortened paths. */
   cwd: string | null;
   theme: Theme;
+  open: boolean;
+  onToggle: () => void;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
   return (
     <div class={`turn-files-card${open ? " open" : ""}`}>
       <button
         class="turn-files-head"
         title={open ? "收起本轮的改动" : "展开本轮的改动"}
-        onClick={() => setOpen(!open)}
+        onClick={onToggle}
       >
         <span class="caret">
           <IconChevron />

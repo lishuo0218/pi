@@ -859,6 +859,18 @@ function MessageStream({
   const [follow, setFollow] = useState(true);
   // 分区懒渲染 (PRD 性能): only the tail slice is mounted; "加载更早" grows it.
   const [visibleCount, setVisibleCount] = useState(50);
+  // Open file-card disclosures, keyed by turn index. The open flag cannot live
+  // in the card: the running turn's card moves to a new host unit on every
+  // streamed row, which remounts it and would collapse it under the user.
+  const [openFileTurns, setOpenFileTurns] = useState<Set<number>>(new Set());
+  const toggleFileTurn = (index: number): void => {
+    setOpenFileTurns((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
   // Only rows that draw something may take a slice slot: a hydrated session
   // has one toolResult row per tool call (rendered as the tool card, not as a
   // row) plus a system message per tool-set change (never rendered). Counting
@@ -995,7 +1007,13 @@ function MessageStream({
         )}
         {orphanTurns.map((turn) => (
           <div class="narrow" key={`files-${turn.index}`}>
-            <TurnFilesCard turn={turn} cwd={cwd} theme={theme} />
+            <TurnFilesCard
+              turn={turn}
+              cwd={cwd}
+              theme={theme}
+              open={openFileTurns.has(turn.index)}
+              onToggle={() => toggleFileTurn(turn.index)}
+            />
           </div>
         ))}
         {rows.length === 0 ? (
@@ -1027,7 +1045,13 @@ function MessageStream({
                 )}
                 {turn === undefined ? null : (
                   <div class="narrow">
-                    <TurnFilesCard turn={turn} cwd={cwd} theme={theme} />
+                    <TurnFilesCard
+                      turn={turn}
+                      cwd={cwd}
+                      theme={theme}
+                      open={openFileTurns.has(turn.index)}
+                      onToggle={() => toggleFileTurn(turn.index)}
+                    />
                   </div>
                 )}
               </Fragment>
